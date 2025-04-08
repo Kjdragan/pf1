@@ -1,0 +1,7 @@
+Hey cursor Ai, help me build a project that summarize youtube video:
+1. It takes a youtube link as input
+2. It extracts interesting topics, and also generate questions and answers for each topic
+3. It explains all the above in a very friendly manner as if i'm 5
+4. Generate an HTML page to visualize the summary
+First read the docs very carefully.
+Then, start with only requirement and utility functions. stop there

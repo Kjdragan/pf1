@@ -1,0 +1,145 @@
+flowchart TD
+
+%% Global Inputs 
+U("User Input"):::external
+
+    %% Core Application Subgraph
+    subgraph "Core Application"
+        CORE_MAIN("main.py"):::core
+        CORE_FLOW("flow.py"):::core
+        CORE_NODES("nodes.py"):::core
+    end
+
+    %% Nodes Pipeline Subgraph
+    subgraph "Nodes Pipeline"
+        BASE_NODE("Base Node"):::node
+        IPN("Input Processing Node"):::node
+        CEN("Content Extraction Node"):::node
+        ELI5("ELI5 Transformation Node"):::node
+        QAN("QA Generation Node"):::node
+        HTMLN("HTML Generation Node"):::node
+        TEN("Topic Extraction Node"):::node
+        TORCH("Topic Orchestrator Node"):::node
+        TPN("Topic Processor Node"):::node
+    end
+
+    %% Utility Functions Subgraph
+    subgraph "Utility Functions"
+        LLM1("Call LLM Utility (src)"):::utility
+        LLM2("Call LLM Utility (utils)"):::utility
+        YT_META("YouTube Metadata Extraction"):::utility
+        YT_TRANS("YouTube Transcript Extraction"):::utility
+        HTML_UTIL("HTML Generation Utility"):::utility
+        LOGGER("Logger Utility"):::utility
+        URL_VALID("URL Validation Utility"):::utility
+    end
+
+    %% External Services
+    EXT("LLM API"):::external
+
+    %% Ancillary Components (Documentation, Config, Support, Agentic)
+    DOC("Documentation"):::doc
+    CONFIG("Configurations & Metadata"):::config
+    SUPPORT("Kevin (Experimental)"):::support
+    AGENTIC("Agentic Coding Rules"):::agentic
+
+    %% Data Flow Connections
+    U -->|"enters"| CORE_MAIN
+    CORE_NODES -->|"triggers"| IPN
+
+    %% Process Pipeline Branches
+    IPN -->|"branch"| CEN
+    CEN -->|"transform"| ELI5
+    ELI5 -->|"generate"| QAN
+    QAN -->|"output"| HTMLN
+
+    IPN -->|"branch"| TEN
+    TEN -->|"orchestrate"| TORCH
+    TORCH -->|"process"| TPN
+    TPN -->|"merge"| HTMLN
+
+    %% Inheritance / Shared Base Node (dotted connections)
+    CEN ---|"inherits"| BASE_NODE
+    ELI5 ---|"inherits"| BASE_NODE
+    QAN ---|"inherits"| BASE_NODE
+    HTMLN ---|"inherits"| BASE_NODE
+    TEN ---|"inherits"| BASE_NODE
+    TORCH ---|"inherits"| BASE_NODE
+    TPN ---|"inherits"| BASE_NODE
+
+    %% Utility Interactions
+    CEN -->|"calls"| LLM1
+    CEN -->|"calls"| LLM2
+    ELI5 -->|"calls"| LLM1
+    ELI5 -->|"calls"| LLM2
+    QAN -->|"calls"| LLM1
+    QAN -->|"calls"| LLM2
+    IPN -->|"processes"| YT_META
+    IPN -->|"processes"| YT_TRANS
+    IPN -->|"validates"| URL_VALID
+    HTMLN -->|"builds"| HTML_UTIL
+
+    %% Utilities to External LLM API
+    LLM1 -->|"requests"| EXT
+    LLM2 -->|"requests"| EXT
+
+    %% Logger shared connection (dotted for cross-cutting concerns)
+    BASE_NODE --- LOGGER
+
+    %% Ancillary Components Connections
+    CORE_MAIN -.-> DOC
+    CORE_FLOW -.-> CONFIG
+    CORE_NODES -.-> CONFIG
+    CORE_MAIN -.-> SUPPORT
+    CORE_FLOW -.-> AGENTIC
+
+    %% Styles and Legend
+    classDef core fill:#f9d6b3,stroke:#333,stroke-width:2px;
+    classDef node fill:#ccf2ff,stroke:#333,stroke-width:2px;
+    classDef utility fill:#d5f5e3,stroke:#333,stroke-width:2px;
+    classDef doc fill:#fef9c3,stroke:#333,stroke-width:2px;
+    classDef config fill:#f6ddcc,stroke:#333,stroke-width:2px;
+    classDef support fill:#f4cccc,stroke:#333,stroke-width:2px;
+    classDef agentic fill:#ead1dc,stroke:#333,stroke-width:2px;
+    classDef external fill:#d9ead3,stroke:#333,stroke-width:2px;
+
+    %% Click Events for Core Application
+    click CORE_MAIN "https://github.com/kjdragan/pf1/blob/main/main.py"
+    click CORE_FLOW "https://github.com/kjdragan/pf1/blob/main/flow.py"
+    click CORE_NODES "https://github.com/kjdragan/pf1/blob/main/nodes.py"
+
+    %% Click Events for Nodes Architecture
+    click BASE_NODE "https://github.com/kjdragan/pf1/blob/main/src/nodes/base_node.py"
+    click CEN "https://github.com/kjdragan/pf1/blob/main/src/nodes/content_extraction_node.py"
+    click ELI5 "https://github.com/kjdragan/pf1/blob/main/src/nodes/eli5_transformation_node.py"
+    click HTMLN "https://github.com/kjdragan/pf1/blob/main/src/nodes/html_generation_node.py"
+    click IPN "https://github.com/kjdragan/pf1/blob/main/src/nodes/input_processing_node.py"
+    click QAN "https://github.com/kjdragan/pf1/blob/main/src/nodes/qa_generation_node.py"
+    click TEN "https://github.com/kjdragan/pf1/blob/main/src/nodes/topic_extraction_node.py"
+    click TORCH "https://github.com/kjdragan/pf1/blob/main/src/nodes/topic_orchestrator_node.py"
+    click TPN "https://github.com/kjdragan/pf1/blob/main/src/nodes/topic_processor_node.py"
+
+    %% Click Events for Utility Functions
+    click LLM1 "https://github.com/kjdragan/pf1/blob/main/src/utils/call_llm.py"
+    click LLM2 "https://github.com/kjdragan/pf1/blob/main/utils/call_llm.py"
+    click YT_META "https://github.com/kjdragan/pf1/blob/main/src/utils/extract_youtube_metadata.py"
+    click YT_TRANS "https://github.com/kjdragan/pf1/blob/main/src/utils/extract_youtube_transcript.py"
+    click HTML_UTIL "https://github.com/kjdragan/pf1/blob/main/src/utils/generate_html.py"
+    click LOGGER "https://github.com/kjdragan/pf1/blob/main/src/utils/logger.py"
+    click URL_VALID "https://github.com/kjdragan/pf1/blob/main/src/utils/validate_youtube_url.py"
+
+    %% Click Events for Documentation
+    click DOC "https://github.com/kjdragan/pf1/tree/main/docs"
+
+    %% Click Events for Configurations and Metadata
+    click CONFIG "https://github.com/kjdragan/pf1/blob/main/.python-version"
+    click CONFIG "https://github.com/kjdragan/pf1/blob/main/pyproject.toml"
+    click CONFIG "https://github.com/kjdragan/pf1/blob/main/requirements.txt"
+
+    %% Click Events for Supporting Elements
+    click SUPPORT "https://github.com/kjdragan/pf1/tree/main/Kevin"
+
+    %% Click Events for Agentic Coding Integration
+    click AGENTIC "https://github.com/kjdragan/pf1/blob/main/.cursorrules"
+    click AGENTIC "https://github.com/kjdragan/pf1/blob/main/.clinerules"
+    click AGENTIC "https://github.com/kjdragan/pf1/blob/main/.windsurfrules"

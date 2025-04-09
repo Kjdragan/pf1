@@ -34,12 +34,15 @@ Make subtle adjustments for a sophisticated audience by:
     },
     AudienceLevel.GENERAL.value: {
         "name": "General",
-        "description": "Mainstream audience, balanced vocabulary, neutral tone",
+        "description": "Senior high school level (grades 11-12), moderate vocabulary, balanced complexity",
         "prompt": """
-Make subtle adjustments for a general mainstream audience by:
-- Lightly adjusting vocabulary where necessary for clarity (not replacing most terms)
-- Adding brief clarifications only where specialized terms might be unfamiliar
-- Making minimal adjustments to tone for general readability
+Make subtle adjustments for a senior high school audience (grades 11-12) by:
+- Using vocabulary appropriate for advanced high school students (more sophisticated than middle school)
+- Including appropriate academic terminology without over-simplification
+- Maintaining reasonably complex sentence structures
+- Using examples and explanations suitable for 16-18 year old students
+- Assuming basic knowledge of civics, history, science, and current events
+- IMPORTANT: Do not "talk down" to the audience or oversimplify complex concepts
 - IMPORTANT: Preserve the original structure, organization, and most of the wording
 """
     },

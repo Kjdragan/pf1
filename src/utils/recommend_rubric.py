@@ -92,15 +92,24 @@ For each recommendation, provide:
 2. A confidence score (0-100)
 3. A brief justification explaining why this rubric is appropriate for this content
 
-Format your response as valid JSON with this structure:
+Your response MUST follow this exact format:
+```json
 [
   {{
     "rubric_id": "rubric_key",
     "confidence": 85,
     "justification": "Brief explanation of why this rubric is appropriate"
   }},
-  ...
+  ...additional recommendations...
 ]
+```
+
+CRITICAL REQUIREMENTS:
+1. Start your response with ```json
+2. End your response with ```
+3. Use ONLY valid JSON with double quotes around keys and string values
+4. Do not include any text outside the JSON code block
+5. Do not use single quotes or trailing commas
 """
     
     try:
@@ -109,26 +118,49 @@ Format your response as valid JSON with this structure:
         
         # Parse the response (assuming it's valid JSON)
         try:
-            recommendations = json.loads(response)
+            # Extract JSON from response if wrapped in markdown code blocks
+            if "```json" in response and "```" in response.split("```json", 1)[1]:
+                json_str = response.split("```json", 1)[1].split("```", 1)[0].strip()
+            elif "```" in response:
+                # Try to extract from any code block
+                json_str = response.split("```", 1)[1].split("```", 1)[0].strip()
+            else:
+                # Use the whole response if no code blocks are found
+                json_str = response.strip()
+            
+            # Parse the JSON response
+            recommendations = json.loads(json_str)
             logger.info(f"Successfully received {len(recommendations)} rubric recommendations")
             
             # Validate and enrich the recommendations
             validated_recommendations = []
             for rec in recommendations:
-                if rec["rubric_id"] in RUBRICS:
+                if isinstance(rec, dict) and "rubric_id" in rec and rec["rubric_id"] in RUBRICS:
                     # Add the full name and description to the recommendation
                     rec["name"] = RUBRICS[rec["rubric_id"]]["name"]
                     rec["description"] = RUBRICS[rec["rubric_id"]]["description"]
+                    
+                    # Ensure confidence is an integer
+                    if "confidence" in rec and isinstance(rec["confidence"], (int, float)):
+                        rec["confidence"] = int(rec["confidence"])
+                    else:
+                        rec["confidence"] = 70  # Default confidence
+                        
                     validated_recommendations.append(rec)
                 else:
-                    logger.warning(f"Received invalid rubric ID: {rec['rubric_id']}")
+                    logger.warning(f"Skipping invalid recommendation format: {rec}")
             
-            # Sort by confidence score in descending order
-            validated_recommendations.sort(key=lambda x: x["confidence"], reverse=True)
-            return validated_recommendations
+            if validated_recommendations:
+                # Sort by confidence score in descending order
+                validated_recommendations.sort(key=lambda x: x["confidence"], reverse=True)
+                return validated_recommendations
+            else:
+                logger.warning("No valid recommendations found")
+                return get_default_recommendations()
             
-        except json.JSONDecodeError:
-            logger.error("Failed to parse LLM response as JSON")
+        except json.JSONDecodeError as json_err:
+            logger.error(f"Failed to parse LLM response as JSON. Error: {str(json_err)}")
+            logger.debug(f"Response that failed parsing: {response[:200]}...")
             # Fallback to default recommendations
             return get_default_recommendations()
             

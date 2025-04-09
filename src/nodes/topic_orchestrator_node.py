@@ -12,6 +12,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 
 from src.nodes.base_node import BaseNode
 from src.nodes.topic_processor_node import TopicProcessorNode
+from src.utils.generate_qa import generate_whole_content_qa
 from src.utils.logger import logger
 
 class TopicOrchestratorNode(BaseNode):
@@ -20,7 +21,7 @@ class TopicOrchestratorNode(BaseNode):
     Maps topics to individual processors and reduces the results.
     """
     
-    def __init__(self, shared_memory=None, max_workers=3, questions_per_topic=3):
+    def __init__(self, shared_memory=None, max_workers=3, questions_per_topic=3, no_qa=False, whole_qa=False):
         """
         Initialize the node with shared memory.
         
@@ -28,15 +29,19 @@ class TopicOrchestratorNode(BaseNode):
             shared_memory (dict): Shared memory dictionary
             max_workers (int): Maximum number of parallel workers for topic processing
             questions_per_topic (int): Number of questions to generate per topic
+            no_qa (bool): Whether to disable Q&A generation entirely
+            whole_qa (bool): Whether to generate comprehensive Q&A for the entire content
         """
         super().__init__(shared_memory)
         self.max_workers = max_workers
         self.questions_per_topic = questions_per_topic
+        self.no_qa = no_qa
+        self.whole_qa = whole_qa
         self.topics = []
         self.transcript = ""
         self.selected_rubric = None
         self.topic_results = {}
-        logger.debug(f"TopicOrchestratorNode initialized with max_workers={max_workers}, questions_per_topic={questions_per_topic}")
+        logger.debug(f"TopicOrchestratorNode initialized with max_workers={max_workers}, questions_per_topic={questions_per_topic}, no_qa={no_qa}, whole_qa={whole_qa}")
     
     def prep(self):
         """
@@ -74,6 +79,7 @@ class TopicOrchestratorNode(BaseNode):
         logger.info(f"Preparing to process {topics_count} topics with {self.max_workers} parallel workers")
         logger.debug(f"Topics to process: {self.topics}")
         logger.debug(f"Selected rubric: {self.selected_rubric['name']}")
+        logger.debug(f"Q&A generation: {'Disabled' if self.no_qa else ('Whole-content' if self.whole_qa else 'Per-topic')}")
     
     def exec(self):
         """
@@ -82,101 +88,111 @@ class TopicOrchestratorNode(BaseNode):
         if "error" in self.shared_memory:
             return
         
-        # Map phase: Process all topics in parallel
-        self._map_phase()
+        logger.info("Starting Map-Reduce topic processing")
         
-        # Reduce phase: Combine results
-        self._reduce_phase()
-    
-    def _map_phase(self):
-        """
-        Map phase: Process all topics in parallel using a thread pool.
-        """
-        logger.info(f"Starting Map phase with {self.max_workers} workers for {len(self.topics)} topics")
+        # Dictionary to hold all Q&A pairs organized by topic
+        qa_pairs = {}
+        # Dictionary to hold all transformed content organized by topic
+        transformed_content = {}
         
-        # Use ThreadPoolExecutor for parallel processing
-        with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            # Submit all topics for processing
-            future_to_topic = {
-                executor.submit(self._process_topic, topic): topic 
-                for topic in self.topics
-            }
-            
-            # Process results as they complete
-            for future in concurrent.futures.as_completed(future_to_topic):
-                topic = future_to_topic[future]
-                try:
-                    result = future.result()
-                    self.topic_results[topic] = result
-                    logger.info(f"Completed processing for topic: {topic}")
-                except Exception as e:
-                    logger.error(f"Error processing topic '{topic}': {str(e)}")
-                    self.shared_memory["error"] = f"Error processing topic '{topic}': {str(e)}"
+        # Process topics in parallel using a thread pool (Map phase)
+        try:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+                # Create a dictionary mapping futures to their topics
+                futures = {
+                    executor.submit(
+                        self._process_topic, 
+                        topic, 
+                        self.transcript, 
+                        self.selected_rubric,
+                        self.questions_per_topic,
+                        self.no_qa
+                    ): topic for topic in self.topics
+                }
+                
+                # Process results as they complete
+                for future in concurrent.futures.as_completed(futures):
+                    topic = futures[future]
+                    try:
+                        result = future.result()
+                        self.topic_results[topic] = result
+                        
+                        # Extract Q&A pairs and transformed content
+                        if not self.no_qa and not self.whole_qa:
+                            qa_pairs[topic] = result.get("qa_pairs", [])
+                        transformed_content[topic] = result.get("transformed_content", "")
+                        
+                        logger.info(f"Successfully processed topic: {topic}")
+                    except Exception as e:
+                        logger.exception(f"Error processing topic {topic}: {str(e)}")
+                        # Continue with other topics on error
+        
+        except Exception as e:
+            error_msg = f"Error in topic processing thread pool: {str(e)}"
+            logger.exception(error_msg)
+            self.shared_memory["error"] = error_msg
+            return
+        
+        # Handle whole content Q&A generation if enabled
+        if not self.no_qa and self.whole_qa:
+            logger.info("Generating comprehensive Q&A for the entire content")
+            try:
+                whole_content_qa = generate_whole_content_qa(self.topics, self.transcript, num_pairs=5)
+                # Store as a special topic 'whole_content' to be rendered differently in HTML
+                qa_pairs["whole_content"] = whole_content_qa
+                logger.info(f"Successfully generated {len(whole_content_qa)} comprehensive Q&A pairs")
+            except Exception as e:
+                logger.exception(f"Error generating whole content Q&A: {str(e)}")
+                # Continue even if whole content Q&A generation fails
+        
+        # Store results in shared memory (Reduce phase)
+        self.shared_memory["qa_pairs"] = qa_pairs
+        self.shared_memory["transformed_content"] = transformed_content
+        
+        logger.info(f"Processed {len(self.topic_results)} topics")
+        logger.info(f"Generated {sum(len(pairs) for pairs in qa_pairs.values())} Q&A pairs")
+        logger.info(f"Generated {len(transformed_content)} transformed content blocks")
     
-    def _process_topic(self, topic):
+    def _process_topic(self, topic, transcript, selected_rubric, questions_per_topic, no_qa):
         """
         Process a single topic using a TopicProcessorNode.
         
         Args:
             topic (str): The topic to process
+            transcript (str): The video transcript
+            selected_rubric (dict): The selected transformation rubric
+            questions_per_topic (int): Number of questions to generate per topic
+            no_qa (bool): Whether to disable Q&A generation
             
         Returns:
-            dict: The processing result
+            dict: The processed results for the topic
         """
-        logger.info(f"Processing topic: {topic}")
+        logger.debug(f"Processing topic: {topic}")
         
-        # Create a topic processor node
-        processor = TopicProcessorNode(
-            topic=topic,
-            transcript=self.transcript,
-            selected_rubric=self.selected_rubric,
-            questions_per_topic=self.questions_per_topic
-        )
+        # Create an isolated shared memory for this topic processor
+        topic_shared_memory = {
+            "topic": topic,
+            "transcript": transcript,
+            "selected_rubric": selected_rubric,
+            "questions_per_topic": questions_per_topic,
+            "no_qa": no_qa
+        }
         
-        return processor.run()["topic_results"][topic]
-    
-    def _reduce_phase(self):
-        """
-        Reduce phase: Combine results from all topic processors.
-        """
-        if "error" in self.shared_memory:
-            return
-            
-        logger.info(f"Starting Reduce phase with {len(self.topic_results)} topic results")
+        # Create and run a TopicProcessorNode for this topic
+        processor = TopicProcessorNode(topic_shared_memory)
+        result_memory = processor.run()
         
-        # Initialize the combined results
-        qa_pairs = {}
-        transformed_content = {}
-        
-        # Combine results from all topics
-        for topic, result in self.topic_results.items():
-            # Add Q&A pairs
-            qa_pairs[topic] = result.get("qa_pairs", [])
-            
-            # Add transformed content
-            transformed_content[topic] = result.get("transformed_content", "")
-        
-        # Store the combined results in shared memory
-        self.shared_memory["qa_pairs"] = qa_pairs
-        self.shared_memory["transformed_content"] = transformed_content
-        self.shared_memory["topic_results"] = self.topic_results
-        
-        # Log summary of combined results
-        total_qa_pairs = sum(len(pairs) for pairs in qa_pairs.values())
-        logger.info(f"Reduce phase complete: Combined {total_qa_pairs} Q&A pairs across {len(qa_pairs)} topics")
+        return {
+            "qa_pairs": result_memory.get("qa_pairs", []),
+            "transformed_content": result_memory.get("transformed_content", "")
+        }
     
     def post(self):
         """
-        Post-process and check for errors.
+        Post-process the topic results.
         """
         if "error" in self.shared_memory:
             logger.error(f"Error in Topic Orchestrator Node: {self.shared_memory['error']}")
-            return
-        
-        if not self.topic_results:
-            error_msg = "No topic results were generated"
-            logger.error(error_msg)
-            self.shared_memory["error"] = error_msg
             return
         
         logger.info("Topic Orchestrator Node completed successfully")

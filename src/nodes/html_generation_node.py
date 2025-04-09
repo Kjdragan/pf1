@@ -28,7 +28,7 @@ class HTMLGenerationNode(BaseNode):
         """
         Prepare for execution by checking if all required data exists in shared memory.
         """
-        required_keys = ["video_id", "metadata", "topics", "qa_pairs", "eli5_content"]
+        required_keys = ["video_id", "metadata", "topics", "qa_pairs", "transformed_content"]
         missing_keys = [key for key in required_keys if key not in self.shared_memory]
         
         if missing_keys:
@@ -41,7 +41,7 @@ class HTMLGenerationNode(BaseNode):
             return
         
         logger.info("Preparing to generate HTML summary")
-        logger.debug(f"Found {len(self.shared_memory['topics'])} topics and {len(self.shared_memory['eli5_content'])} ELI5 explanations")
+        logger.debug(f"Found {len(self.shared_memory['topics'])} topics and {len(self.shared_memory['transformed_content'])} transformed content blocks")
     
     def exec(self):
         """
@@ -56,7 +56,9 @@ class HTMLGenerationNode(BaseNode):
             "metadata": self.shared_memory["metadata"],
             "topics": self.shared_memory["topics"],
             "qa_pairs": self.shared_memory["qa_pairs"],
-            "eli5_content": self.shared_memory["eli5_content"]
+            "transformed_content": self.shared_memory["transformed_content"],
+            "selected_rubric": self.shared_memory.get("selected_rubric", {}),
+            "audience_level": self.shared_memory.get("audience_level", "sophisticated")
         }
         
         # Generate the HTML content
@@ -79,29 +81,23 @@ class HTMLGenerationNode(BaseNode):
                     f.write(html_content)
                 
                 logger.info(f"HTML summary saved to: {self.output_path}")
-                
             except Exception as e:
-                error_msg = f"Error saving HTML file: {str(e)}"
-                logger.error(error_msg)
+                error_msg = f"Failed to save HTML file: {str(e)}"
+                logger.exception(error_msg)
                 self.shared_memory["error"] = error_msg
     
     def post(self):
         """
-        Post-process and check for errors.
+        Post-process after HTML generation.
         """
         if "error" in self.shared_memory:
-            logger.error(f"Error in HTML Generation Node: {self.shared_memory['error']}")
             return
-        
-        if "html_output" not in self.shared_memory:
-            error_msg = "Failed to generate HTML output"
-            logger.error(error_msg)
-            self.shared_memory["error"] = error_msg
-            return
-        
-        html_length = len(self.shared_memory["html_output"])
-        logger.info(f"Generated HTML summary ({html_length} characters)")
-        logger.info("HTML Generation Node completed successfully")
+            
+        if "html_output" in self.shared_memory and self.output_path:
+            logger.info(f"HTML summary is available at: {os.path.abspath(self.output_path)}")
+            logger.info("HTML Generation completed successfully")
+        else:
+            logger.warning("HTML summary was generated but may not have been saved to file")
 
 
 if __name__ == "__main__":
@@ -144,7 +140,7 @@ if __name__ == "__main__":
                 }
             ]
         },
-        "eli5_content": {
+        "transformed_content": {
             "Music Video Plot": "In this video, a man named Rick is dancing and singing. He moves his arms and legs in a funny way that people like to copy. He sings in different places like a stage and outside.",
             "Song Lyrics": "Rick is singing about being a good friend. He promises to always be there for someone special and never make them sad or tell lies. It's like when you promise to always be nice to your best friend.",
             "Cultural Impact": "This song became super famous because people on the internet started using it as a funny joke. They would trick their friends by saying 'click here for something cool' but the link would take them to this song instead. This joke is called 'Rickrolling'."

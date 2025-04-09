@@ -20,148 +20,150 @@ class TopicProcessorNode(BaseNode):
     This node is designed to be used as part of a Map-Reduce pattern.
     """
     
-    def __init__(self, shared_memory=None, topic=None, transcript=None, selected_rubric=None, questions_per_topic=3):
+    def __init__(self, shared_memory=None):
         """
-        Initialize the node with topic, transcript, and rubric information.
+        Initialize the node with shared memory.
         
         Args:
-            shared_memory (dict): Shared memory dictionary (optional)
-            topic (str): The topic to process
-            transcript (str): The video transcript
-            selected_rubric (dict): The selected rubric information
-            questions_per_topic (int): Number of questions to generate per topic
+            shared_memory (dict): Shared memory dictionary containing:
+                - topic: The topic to process
+                - transcript: The video transcript
+                - selected_rubric: The selected rubric information
+                - questions_per_topic: Number of questions to generate per topic
+                - no_qa (optional): Whether to disable Q&A generation
         """
         super().__init__(shared_memory or {})
-        self.topic = topic
-        self.transcript = transcript
-        self.selected_rubric = selected_rubric
-        self.questions_per_topic = questions_per_topic
-        self.result = {
-            "topic": topic,
-            "qa_pairs": [],
-            "transformed_content": ""
-        }
-        logger.debug(f"TopicProcessorNode initialized for topic: {topic}")
+        self.topic = self.shared_memory.get("topic")
+        self.transcript = self.shared_memory.get("transcript")
+        self.selected_rubric = self.shared_memory.get("selected_rubric")
+        self.questions_per_topic = self.shared_memory.get("questions_per_topic", 3)
+        self.no_qa = self.shared_memory.get("no_qa", False)
+        logger.debug(f"TopicProcessorNode initialized for topic: {self.topic}")
     
     def prep(self):
         """
         Prepare for execution by checking if topic, transcript, and rubric are available.
         """
-        # If topic and transcript were not provided in constructor, try to get from shared memory
-        if self.topic is None and "current_topic" in self.shared_memory:
-            self.topic = self.shared_memory["current_topic"]
-            
-        if self.transcript is None and "transcript" in self.shared_memory:
-            self.transcript = self.shared_memory["transcript"]
-            
-        if self.selected_rubric is None and "selected_rubric" in self.shared_memory:
-            self.selected_rubric = self.shared_memory["selected_rubric"]
-            
-        if self.topic is None:
-            error_msg = "No topic provided for processing"
+        if not self.topic:
+            error_msg = "No topic specified for processing"
             logger.error(error_msg)
             self.shared_memory["error"] = error_msg
             return
-            
-        if self.transcript is None:
-            error_msg = "No transcript provided for processing"
+        
+        if not self.transcript:
+            error_msg = "No transcript provided for topic processing"
             logger.error(error_msg)
             self.shared_memory["error"] = error_msg
             return
-            
-        if self.selected_rubric is None:
-            error_msg = "No rubric provided for content transformation"
+        
+        if not self.selected_rubric:
+            error_msg = "No rubric selected for topic transformation"
             logger.error(error_msg)
             self.shared_memory["error"] = error_msg
             return
-            
-        logger.info(f"Processing topic: {self.topic} with rubric: {self.selected_rubric.get('name', 'Unknown')}")
+        
+        logger.info(f"Preparing to process topic: {self.topic}")
+        logger.debug(f"Selected rubric: {self.selected_rubric['name']}")
+        logger.debug(f"Q&A generation: {'Disabled' if self.no_qa else 'Enabled'}")
     
     def exec(self):
         """
-        Execute topic processing: generate Q&A pairs and apply transformation.
+        Execute topic processing, including Q&A generation and content transformation.
         """
         if "error" in self.shared_memory:
             return
-            
-        # Step 1: Generate Q&A pairs
-        self._generate_qa_pairs()
         
-        # Step 2: Apply selected rubric transformation
-        self._apply_rubric_transformation()
+        # Process the topic
+        try:
+            # Generate Q&A pairs if not disabled
+            qa_pairs = []
+            if not self.no_qa:
+                qa_pairs = self._generate_qa_pairs()
+                logger.info(f"Generated {len(qa_pairs)} Q&A pairs for topic: {self.topic}")
+            
+            # Apply the selected rubric
+            transformed_content = self._apply_rubric_transformation()
+            logger.info(f"Applied rubric '{self.selected_rubric['name']}' to topic: {self.topic}")
+            
+            # Store the results
+            self.shared_memory["qa_pairs"] = qa_pairs
+            self.shared_memory["transformed_content"] = transformed_content
+            
+        except Exception as e:
+            error_msg = f"Error processing topic '{self.topic}': {str(e)}"
+            logger.exception(error_msg)
+            self.shared_memory["error"] = error_msg
     
     def _generate_qa_pairs(self):
         """
-        Generate Q&A pairs for the topic using the generate_qa utility.
+        Generate Q&A pairs for the topic.
+        
+        Returns:
+            list: List of Q&A pairs
         """
-        logger.info(f"Generating Q&A pairs for topic: {self.topic}")
+        logger.info(f"Generating {self.questions_per_topic} Q&A pairs for topic: {self.topic}")
         
         try:
             # Call the generate_qa_pairs utility
             qa_pairs = generate_qa_pairs(self.topic, self.transcript, self.questions_per_topic)
-            
-            # Store the Q&A pairs
-            self.result["qa_pairs"] = qa_pairs
-            logger.info(f"Generated {len(qa_pairs)} Q&A pairs for topic '{self.topic}'")
+            return qa_pairs
             
         except Exception as e:
-            error_msg = f"Error generating Q&A pairs for topic '{self.topic}': {str(e)}"
-            logger.exception(error_msg)
-            self.shared_memory["error"] = error_msg
+            logger.exception(f"Error generating Q&A pairs for topic {self.topic}: {str(e)}")
+            return []
     
     def _apply_rubric_transformation(self):
         """
-        Apply the selected rubric transformation to the topic's content.
+        Apply the selected rubric transformation to the topic.
+        
+        Returns:
+            str: The transformed content
         """
-        if "error" in self.shared_memory or not self.result["qa_pairs"]:
-            return
-            
-        logger.info(f"Applying {self.selected_rubric.get('rubric_id', 'unknown')} rubric to topic: {self.topic}")
+        logger.info(f"Applying rubric '{self.selected_rubric['name']}' to topic: {self.topic}")
         
         try:
-            # Prepare content for rubric transformation
-            topic_content = {
+            # Generate mock Q&A content to pass to apply_rubric
+            mock_qa_pairs = []
+            if not self.no_qa:
+                mock_qa_pairs = self._generate_qa_pairs()
+            
+            # Format content dictionary as expected by apply_rubric
+            content = {
                 "topics": [self.topic],
                 "qa_pairs": {
-                    self.topic: self.result["qa_pairs"]
+                    self.topic: mock_qa_pairs
                 }
             }
             
-            # Call the apply_rubric utility
-            transformed_result = apply_rubric(
-                topic_content, 
-                self.selected_rubric.get("rubric_id", "insightful_conversational")
+            # Call the apply_rubric utility with correct parameters
+            transformed = apply_rubric(
+                content=content,
+                rubric_type=self.selected_rubric.get("rubric_id", "insightful_conversational")
             )
             
-            # Store the transformed content
-            if transformed_result and "transformed_content" in transformed_result:
-                self.result["transformed_content"] = transformed_result["transformed_content"].get(self.topic, "")
-                logger.info(f"Successfully applied rubric transformation to topic '{self.topic}'")
-            else:
-                error_msg = f"Rubric transformation failed for topic '{self.topic}'"
-                logger.error(error_msg)
-                self.result["transformed_content"] = f"Transformation error for {self.topic}."
-                
+            # Extract the transformed content for this topic
+            if transformed and "transformed_content" in transformed:
+                return transformed["transformed_content"].get(self.topic, f"Error: No transformed content for {self.topic}")
+            return f"Error: Failed to transform content for {self.topic}"
+            
         except Exception as e:
-            error_msg = f"Error applying rubric to topic '{self.topic}': {str(e)}"
-            logger.exception(error_msg)
-            self.shared_memory["error"] = error_msg
-            self.result["transformed_content"] = f"Error transforming {self.topic}: {str(e)}"
+            logger.exception(f"Error applying rubric to topic {self.topic}: {str(e)}")
+            return f"Error transforming content for {self.topic}: {str(e)}"
     
     def post(self):
         """
-        Post-process and return the results.
+        Post-process the topic results.
         """
-        # Store the results in shared memory if needed
-        if "topic_results" not in self.shared_memory:
-            self.shared_memory["topic_results"] = {}
-            
-        self.shared_memory["topic_results"][self.topic] = self.result
+        if "error" in self.shared_memory:
+            logger.error(f"Error in Topic Processor Node: {self.shared_memory['error']}")
+            return
         
-        logger.info(f"Topic processing completed for '{self.topic}'")
-        logger.debug(f"Generated {len(self.result['qa_pairs'])} Q&A pairs and {len(self.result.get('transformed_content', ''))} characters of transformed content")
+        qa_pairs_count = len(self.shared_memory.get("qa_pairs", []))
+        transformed_content_length = len(self.shared_memory.get("transformed_content", ""))
         
-        return self.result
+        logger.info(f"Topic Processor completed for: {self.topic}")
+        logger.info(f"Generated {qa_pairs_count} Q&A pairs")
+        logger.info(f"Transformed content length: {transformed_content_length} characters")
 
 
 if __name__ == "__main__":
@@ -191,21 +193,25 @@ if __name__ == "__main__":
         "confidence": 85
     }
     
-    node = TopicProcessorNode(
-        topic=test_topic, 
-        transcript=test_transcript,
-        selected_rubric=test_rubric
-    )
-    result = node.run()
+    shared_memory = {
+        "topic": test_topic,
+        "transcript": test_transcript,
+        "selected_rubric": test_rubric,
+        "questions_per_topic": 3,
+        "no_qa": False
+    }
+    
+    node = TopicProcessorNode(shared_memory)
+    node.run()
     
     # Print the results
-    if "error" not in result:
+    if "error" not in shared_memory:
         print("\nTopic Processing Results:")
-        print(f"Topic: {result['topic_results'][test_topic]['topic']}")
-        print(f"Q&A Pairs: {len(result['topic_results'][test_topic]['qa_pairs'])}")
-        for i, qa in enumerate(result['topic_results'][test_topic]['qa_pairs']):
+        print(f"Topic: {shared_memory['topic']}")
+        print(f"Q&A Pairs: {len(shared_memory['qa_pairs'])}")
+        for i, qa in enumerate(shared_memory['qa_pairs']):
             print(f"  Q{i+1}: {qa.get('question', '')}")
             print(f"  A{i+1}: {qa.get('answer', '')[:100]}...")
-        print(f"Transformed Content: {result['topic_results'][test_topic]['transformed_content'][:200]}...")
+        print(f"Transformed Content: {shared_memory['transformed_content'][:200]}...")
     else:
-        print(f"Error: {result['error']}")
+        print(f"Error: {shared_memory['error']}")

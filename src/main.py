@@ -23,7 +23,7 @@ from src.nodes.audience_wrapper_node import AudienceWrapperNode
 from src.nodes.html_generation_node import HTMLGenerationNode
 from src.utils.logger import logger
 
-def run_pipeline(youtube_url, output_dir="output", enable_chunking=False, max_workers=3):
+def run_pipeline(youtube_url, output_dir="output", enable_chunking=False, max_workers=3, no_qa=False, whole_qa=False):
     """
     Run the complete YouTube video summarization pipeline.
     
@@ -32,6 +32,8 @@ def run_pipeline(youtube_url, output_dir="output", enable_chunking=False, max_wo
         output_dir (str): Directory to save the output HTML file
         enable_chunking (bool): Whether to enable transcript chunking
         max_workers (int): Maximum number of parallel workers for topic processing
+        no_qa (bool): Disable generation of Q&A pairs
+        whole_qa (bool): Generate comprehensive Q&A for entire content instead of per-topic
     """
     logger.info(f"{'='*60}")
     logger.info(f"YouTube Video Summarizer")
@@ -39,6 +41,8 @@ def run_pipeline(youtube_url, output_dir="output", enable_chunking=False, max_wo
     logger.info(f"Processing URL: {youtube_url}")
     logger.info(f"Chunking: {'Enabled' if enable_chunking else 'Disabled'}")
     logger.info(f"Parallel Workers: {max_workers}")
+    logger.info(f"No Q&A: {no_qa}")
+    logger.info(f"Whole Q&A: {whole_qa}")
     logger.info(f"{'='*60}")
     
     # Initialize shared memory
@@ -125,7 +129,7 @@ def run_pipeline(youtube_url, output_dir="output", enable_chunking=False, max_wo
         
         # 6. Topic Processing Orchestrator Node
         logger.info("[6/8] Starting Topic Processing...")
-        orchestrator_node = TopicOrchestratorNode(shared_memory, max_workers=max_workers, questions_per_topic=3)
+        orchestrator_node = TopicOrchestratorNode(shared_memory, max_workers=max_workers, questions_per_topic=3, no_qa=no_qa, whole_qa=whole_qa)
         shared_memory = orchestrator_node.run()
         
         # Check for errors
@@ -195,6 +199,8 @@ def main():
     parser.add_argument("--output", "-o", default="output", help="Output directory for HTML summary")
     parser.add_argument("--chunk", action="store_true", help="Enable transcript chunking for long videos")
     parser.add_argument("--workers", "-w", type=int, default=3, help="Number of parallel workers for topic processing")
+    parser.add_argument("--no-qa", action="store_true", help="Disable generation of Q&A pairs")
+    parser.add_argument("--whole-qa", action="store_true", help="Generate comprehensive Q&A for entire content instead of per-topic")
     
     args = parser.parse_args()
     
@@ -206,7 +212,7 @@ def main():
     logger.info(f"Starting YouTube Video Summarizer with URL: {youtube_url}")
     
     # Run the pipeline
-    run_pipeline(youtube_url, args.output, args.chunk, args.workers)
+    run_pipeline(youtube_url, args.output, args.chunk, args.workers, args.no_qa, args.whole_qa)
 
 if __name__ == "__main__":
     main()

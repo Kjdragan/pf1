@@ -16,7 +16,10 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from src.nodes.input_processing_node import InputProcessingNode
 from src.nodes.content_extraction_node import ContentExtractionNode
 from src.nodes.topic_extraction_node import TopicExtractionNode
+from src.nodes.rubric_recommendation_node import RubricRecommendationNode
+from src.nodes.rubric_selection_node import RubricSelectionNode
 from src.nodes.topic_orchestrator_node import TopicOrchestratorNode
+from src.nodes.audience_wrapper_node import AudienceWrapperNode
 from src.nodes.html_generation_node import HTMLGenerationNode
 from src.utils.logger import logger
 
@@ -51,7 +54,7 @@ def run_pipeline(youtube_url, output_dir="output", enable_chunking=False, max_wo
     
     try:
         # 1. Input Processing Node
-        logger.info("[1/5] Starting Input Processing...")
+        logger.info("[1/8] Starting Input Processing...")
         input_node = InputProcessingNode(shared_memory)
         shared_memory = input_node.run()
         
@@ -63,7 +66,7 @@ def run_pipeline(youtube_url, output_dir="output", enable_chunking=False, max_wo
         logger.info(f"Successfully processed video: {shared_memory.get('metadata', {}).get('title', 'Unknown')}")
         
         # 2. Content Extraction Node
-        logger.info("[2/5] Starting Content Extraction...")
+        logger.info("[2/8] Starting Content Extraction...")
         content_node = ContentExtractionNode(shared_memory)
         shared_memory = content_node.run()
         
@@ -76,7 +79,7 @@ def run_pipeline(youtube_url, output_dir="output", enable_chunking=False, max_wo
         logger.info(f"Successfully extracted transcript ({transcript_length} characters)")
         
         # 3. Topic Extraction Node
-        logger.info("[3/5] Starting Topic Extraction...")
+        logger.info("[3/8] Starting Topic Extraction...")
         topic_node = TopicExtractionNode(shared_memory, chunk_size=chunk_size, overlap=overlap)
         shared_memory = topic_node.run()
         
@@ -90,8 +93,38 @@ def run_pipeline(youtube_url, output_dir="output", enable_chunking=False, max_wo
         for i, topic in enumerate(topics):
             logger.info(f"  Topic {i+1}: {topic}")
         
-        # 4. Topic Processing Orchestrator Node
-        logger.info("[4/5] Starting Topic Processing...")
+        # 4. Rubric Recommendation Node
+        logger.info("[4/8] Starting Rubric Recommendation...")
+        rubric_recommendation_node = RubricRecommendationNode(shared_memory)
+        shared_memory = rubric_recommendation_node.run()
+        
+        # Check for errors
+        if "error" in shared_memory:
+            logger.error(f"Rubric Recommendation failed: {shared_memory['error']}")
+            return shared_memory
+        
+        recommended_rubrics = shared_memory.get('recommended_rubrics', [])
+        logger.info(f"Successfully generated {len(recommended_rubrics)} rubric recommendations")
+        for i, rubric in enumerate(recommended_rubrics[:3]):  # Show top 3
+            logger.info(f"  Recommendation {i+1}: {rubric['name']} (Confidence: {rubric['confidence']}%)")
+        
+        # 5. Rubric Selection Node
+        logger.info("[5/8] Starting Rubric Selection...")
+        rubric_selection_node = RubricSelectionNode(shared_memory)
+        shared_memory = rubric_selection_node.run()
+        
+        # Check for errors
+        if "error" in shared_memory:
+            logger.error(f"Rubric Selection failed: {shared_memory['error']}")
+            return shared_memory
+        
+        selected_rubric = shared_memory.get('selected_rubric', {})
+        audience_level = shared_memory.get('audience_level', 'sophisticated')
+        logger.info(f"Selected rubric: {selected_rubric['name']}")
+        logger.info(f"Selected audience level: {audience_level}")
+        
+        # 6. Topic Processing Orchestrator Node
+        logger.info("[6/8] Starting Topic Processing...")
         orchestrator_node = TopicOrchestratorNode(shared_memory, max_workers=max_workers, questions_per_topic=3)
         shared_memory = orchestrator_node.run()
         
@@ -101,14 +134,26 @@ def run_pipeline(youtube_url, output_dir="output", enable_chunking=False, max_wo
             return shared_memory
         
         qa_pairs = shared_memory.get('qa_pairs', {})
-        eli5_content = shared_memory.get('eli5_content', {})
+        transformed_content = shared_memory.get('transformed_content', {})
         total_qa_pairs = sum(len(pairs) for pairs in qa_pairs.values())
         
         logger.info(f"Successfully processed {len(topics)} topics")
-        logger.info(f"Generated {total_qa_pairs} Q&A pairs and {len(eli5_content)} ELI5 explanations")
+        logger.info(f"Generated {total_qa_pairs} Q&A pairs and {len(transformed_content)} transformed content blocks")
         
-        # 5. HTML Generation Node
-        logger.info("[5/5] Starting HTML Generation...")
+        # 7. Audience Wrapper Node
+        logger.info("[7/8] Starting Audience Wrapper Application...")
+        audience_wrapper_node = AudienceWrapperNode(shared_memory)
+        shared_memory = audience_wrapper_node.run()
+        
+        # Check for errors
+        if "error" in shared_memory:
+            logger.error(f"Audience Wrapper failed: {shared_memory['error']}")
+            return shared_memory
+        
+        logger.info(f"Successfully applied {audience_level} audience wrapper to content")
+        
+        # 8. HTML Generation Node
+        logger.info("[8/8] Starting HTML Generation...")
         # Create a timestamped filename
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         video_id = shared_memory.get("video_id", "unknown")
@@ -129,6 +174,8 @@ def run_pipeline(youtube_url, output_dir="output", enable_chunking=False, max_wo
         logger.info(f"Video: {shared_memory.get('metadata', {}).get('title', 'Unknown')}")
         logger.info(f"Topics: {len(shared_memory.get('topics', []))}")
         logger.info(f"Q&A Pairs: {sum(len(pairs) for pairs in shared_memory.get('qa_pairs', {}).values())}")
+        logger.info(f"Transformation Rubric: {shared_memory.get('selected_rubric', {}).get('name', 'Unknown')}")
+        logger.info(f"Audience Level: {shared_memory.get('audience_level', 'sophisticated')}")
         logger.info(f"Output File: {output_file}")
         logger.info(f"{'='*60}")
         

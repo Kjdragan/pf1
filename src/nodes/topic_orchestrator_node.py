@@ -34,22 +34,31 @@ class TopicOrchestratorNode(BaseNode):
         self.questions_per_topic = questions_per_topic
         self.topics = []
         self.transcript = ""
+        self.selected_rubric = None
         self.topic_results = {}
         logger.debug(f"TopicOrchestratorNode initialized with max_workers={max_workers}, questions_per_topic={questions_per_topic}")
     
     def prep(self):
         """
-        Prepare for execution by checking if topics and transcript exist in shared memory.
+        Prepare for execution by checking if topics, transcript, and selected rubric exist in shared memory.
         """
         if "topics" not in self.shared_memory:
             error_msg = "Topics not found in shared memory"
             logger.error(error_msg)
-            raise ValueError(error_msg)
+            self.shared_memory["error"] = error_msg
+            return
         
         if "transcript" not in self.shared_memory:
             error_msg = "Transcript not found in shared memory"
             logger.error(error_msg)
-            raise ValueError(error_msg)
+            self.shared_memory["error"] = error_msg
+            return
+        
+        if "selected_rubric" not in self.shared_memory:
+            error_msg = "Selected rubric not found in shared memory"
+            logger.error(error_msg)
+            self.shared_memory["error"] = error_msg
+            return
         
         if "error" in self.shared_memory:
             logger.warning(f"Skipping Topic Orchestration due to previous error: {self.shared_memory['error']}")
@@ -57,12 +66,14 @@ class TopicOrchestratorNode(BaseNode):
         
         self.topics = self.shared_memory["topics"]
         self.transcript = self.shared_memory["transcript"]
+        self.selected_rubric = self.shared_memory["selected_rubric"]
         
         topics_count = len(self.topics)
         # Adjust max_workers if there are fewer topics than workers
         self.max_workers = min(self.max_workers, topics_count)
         logger.info(f"Preparing to process {topics_count} topics with {self.max_workers} parallel workers")
         logger.debug(f"Topics to process: {self.topics}")
+        logger.debug(f"Selected rubric: {self.selected_rubric['name']}")
     
     def exec(self):
         """
@@ -100,14 +111,7 @@ class TopicOrchestratorNode(BaseNode):
                     logger.info(f"Completed processing for topic: {topic}")
                 except Exception as e:
                     logger.error(f"Error processing topic '{topic}': {str(e)}")
-                    # Create an empty result for failed topics
-                    self.topic_results[topic] = {
-                        "topic": topic,
-                        "qa_pairs": [],
-                        "eli5_content": f"Error processing topic: {str(e)}"
-                    }
-        
-        logger.info(f"Map phase complete: Processed {len(self.topic_results)} topics")
+                    self.shared_memory["error"] = f"Error processing topic '{topic}': {str(e)}"
     
     def _process_topic(self, topic):
         """
@@ -121,10 +125,11 @@ class TopicOrchestratorNode(BaseNode):
         """
         logger.info(f"Processing topic: {topic}")
         
-        # Create and run a TopicProcessorNode for this topic
+        # Create a topic processor node
         processor = TopicProcessorNode(
             topic=topic,
             transcript=self.transcript,
+            selected_rubric=self.selected_rubric,
             questions_per_topic=self.questions_per_topic
         )
         
@@ -141,19 +146,19 @@ class TopicOrchestratorNode(BaseNode):
         
         # Initialize the combined results
         qa_pairs = {}
-        eli5_content = {}
+        transformed_content = {}
         
         # Combine results from all topics
         for topic, result in self.topic_results.items():
             # Add Q&A pairs
             qa_pairs[topic] = result.get("qa_pairs", [])
             
-            # Add ELI5 content
-            eli5_content[topic] = result.get("eli5_content", "")
+            # Add transformed content
+            transformed_content[topic] = result.get("transformed_content", "")
         
         # Store the combined results in shared memory
         self.shared_memory["qa_pairs"] = qa_pairs
-        self.shared_memory["eli5_content"] = eli5_content
+        self.shared_memory["transformed_content"] = transformed_content
         self.shared_memory["topic_results"] = self.topic_results
         
         # Log summary of combined results
@@ -198,30 +203,42 @@ if __name__ == "__main__":
     image recognition tasks.
     """
     
+    # Test rubric
+    test_rubric = {
+        "rubric_id": "structured_digest",
+        "name": "Structured Knowledge Digest",
+        "confidence": 85,
+        "description": "High compression, concise knowledge delivery, organized bullet points, clear headings"
+    }
+    
     # Initialize shared memory
     shared_memory = {
         "topics": test_topics,
-        "transcript": test_transcript
+        "transcript": test_transcript,
+        "selected_rubric": test_rubric
     }
     
     # Create and run the node
     node = TopicOrchestratorNode(shared_memory, max_workers=2)
     updated_memory = node.run()
     
-    # Print the results
-    logger.info("\nShared Memory after processing:")
-    
-    # Print Q&A pairs
-    qa_pairs = updated_memory.get("qa_pairs", {})
-    for topic, pairs in qa_pairs.items():
-        logger.info(f"\nTopic: {topic}")
-        logger.info(f"Q&A Pairs: {len(pairs)}")
-        for i, qa in enumerate(pairs):
-            logger.info(f"  Q{i+1}: {qa.get('question', '')}")
-            logger.info(f"  A{i+1}: {qa.get('answer', '')[:100]}...")
-    
-    # Print ELI5 content
-    eli5_content = updated_memory.get("eli5_content", {})
-    for topic, explanation in eli5_content.items():
-        logger.info(f"\nTopic ELI5: {topic}")
-        logger.info(explanation[:200] + "..." if len(explanation) > 200 else explanation)
+    # Print the results if no error
+    if "error" not in updated_memory:
+        print("\nShared Memory after processing:")
+        
+        # Print Q&A pairs
+        qa_pairs = updated_memory.get("qa_pairs", {})
+        for topic, pairs in qa_pairs.items():
+            print(f"\nTopic: {topic}")
+            print(f"Q&A Pairs: {len(pairs)}")
+            for i, qa in enumerate(pairs):
+                print(f"  Q{i+1}: {qa.get('question', '')}")
+                print(f"  A{i+1}: {qa.get('answer', '')[:100]}...")
+        
+        # Print transformed content
+        transformed_content = updated_memory.get("transformed_content", {})
+        for topic, content in transformed_content.items():
+            print(f"\nTransformed Content for {topic}:")
+            print(content[:200] + "..." if len(content) > 200 else content)
+    else:
+        print(f"Error: {updated_memory['error']}")

@@ -4,6 +4,8 @@ Topic Extraction Node for YouTube Video Summarizer.
 import sys
 import os
 import textwrap
+import concurrent.futures
+from typing import List, Dict, Any
 
 # Add the project root to the path so we can import from src.utils
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -74,82 +76,114 @@ class TopicExtractionNode(BaseNode):
         if "error" in self.shared_memory:
             return
             
-        # Process each chunk to extract topics
-        for i, chunk in enumerate(self.chunks):
-            logger.info(f"Processing chunk {i+1}/{len(self.chunks)}...")
+        # Use ThreadPoolExecutor for parallel processing of chunks
+        max_workers = min(len(self.chunks), 4)  # Limit concurrent API calls
+        logger.info(f"Processing {len(self.chunks)} chunks with {max_workers} parallel workers")
+        
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # Submit all chunk processing tasks
+            future_to_chunk = {
+                executor.submit(self._process_chunk, i, chunk): i 
+                for i, chunk in enumerate(self.chunks)
+            }
             
-            # Create prompt for topic extraction
-            prompt = textwrap.dedent(f"""
-            You are an expert at analyzing video content and identifying main topics.
-            
-            I'll provide you with a transcript from a YouTube video. Your task is to:
-            1. Identify the main topics discussed in this segment
-            2. List each topic as a short, clear phrase (3-7 words)
-            3. Provide at most {self.max_topics} topics
-            4. Focus on substantive content, not introductions or conclusions
-            
-            Here is the transcript segment:
-            
-            {chunk[:2000]}...
-            
-            Respond with ONLY a JSON array of topic strings. For example:
-            ["Topic One", "Topic Two", "Topic Three"]
-            """)
-            
-            # Call LLM to extract topics
-            try:
-                logger.debug(f"Calling LLM for chunk {i+1}")
-                # Use a shorter timeout for topic extraction to prevent hanging
-                response = call_llm(prompt, temperature=0.3, max_tokens=200, timeout=30)
-                logger.debug(f"LLM response for chunk {i+1}: {response[:100]}...")
-                
-                # Check if we got an error response
-                if response.startswith("Error:"):
-                    logger.warning(f"LLM error for chunk {i+1}: {response}")
-                    # Add some default topics if we can't get them from the LLM
-                    if i == 0:  # Only for the first chunk to avoid duplicates
-                        self.chunk_topics.append(["Main Content", "Key Points", "Summary"])
-                        logger.info("Using default topics due to LLM error")
-                    continue
-                
-                # Clean up the response to extract just the JSON array
-                cleaned_response = response.strip()
-                if cleaned_response.startswith("```json"):
-                    cleaned_response = cleaned_response.split("```json")[1]
-                if cleaned_response.endswith("```"):
-                    cleaned_response = cleaned_response.split("```")[0]
-                
-                # Try to parse as JSON, but handle errors gracefully
+            # Collect results as they complete
+            for future in concurrent.futures.as_completed(future_to_chunk):
+                chunk_index = future_to_chunk[future]
                 try:
-                    import json
-                    topics = json.loads(cleaned_response)
-                    if isinstance(topics, list):
+                    topics = future.result()
+                    if topics:
                         self.chunk_topics.append(topics)
-                        logger.info(f"Extracted {len(topics)} topics from chunk {i+1}")
-                        logger.debug(f"Topics from chunk {i+1}: {topics}")
-                    else:
-                        logger.warning(f"Expected list but got {type(topics)} from LLM")
-                        # Try to extract topics from text response
-                        self.chunk_topics.append([cleaned_response])
-                except json.JSONDecodeError:
-                    logger.warning(f"Could not parse LLM response as JSON: {cleaned_response}")
-                    # Try to extract topics from text response
-                    lines = cleaned_response.split("\n")
-                    potential_topics = [line.strip().strip('",[]') for line in lines if line.strip()]
-                    self.chunk_topics.append(potential_topics)
-                    logger.info(f"Extracted {len(potential_topics)} topics from non-JSON response")
-            except Exception as e:
-                logger.error(f"Error calling LLM for chunk {i+1}: {str(e)}")
-                # Add some default topics if we can't get them from the LLM
-                if i == 0:  # Only for the first chunk to avoid duplicates
-                    self.chunk_topics.append(["Main Content", "Key Points", "Summary"])
-                    logger.info("Using default topics due to exception")
-                continue
-                
+                        logger.info(f"Completed processing for chunk {chunk_index+1}/{len(self.chunks)}")
+                except Exception as e:
+                    logger.error(f"Error processing chunk {chunk_index+1}: {str(e)}")
+                    
         # If we couldn't extract any topics, add some default ones
         if not self.chunk_topics:
             logger.warning("No topics extracted, using default topics")
             self.chunk_topics.append(["Main Content", "Key Points", "Summary"])
+    
+    def _process_chunk(self, chunk_index: int, chunk: str) -> List[str]:
+        """
+        Process a single chunk to extract topics.
+        
+        Args:
+            chunk_index (int): Index of the chunk
+            chunk (str): Content of the chunk
+            
+        Returns:
+            List[str]: Extracted topics
+        """
+        logger.info(f"Processing chunk {chunk_index+1}/{len(self.chunks)}...")
+        
+        # Create prompt for topic extraction
+        prompt = textwrap.dedent(f"""
+        You are an expert at analyzing video content and identifying main topics.
+        
+        I'll provide you with a transcript from a YouTube video. Your task is to:
+        1. Identify the main topics discussed in this segment
+        2. List each topic as a short, clear phrase (3-7 words)
+        3. Provide at most {self.max_topics} topics
+        4. Focus on substantive content, not introductions or conclusions
+        
+        Here is the transcript segment:
+        
+        {chunk[:2000]}...
+        
+        Respond with ONLY a JSON array of topic strings. For example:
+        ["Topic One", "Topic Two", "Topic Three"]
+        """)
+        
+        # Call LLM to extract topics
+        try:
+            logger.info(f"Calling LLM for chunk {chunk_index+1} (timeout: 30s)...")
+            response = call_llm(prompt, temperature=0.3, max_tokens=200, timeout=30)
+            
+            # Check if we got an error response
+            if response.startswith("Error:"):
+                logger.warning(f"LLM API error for chunk {chunk_index+1}: {response}")
+                # Add some default topics if we can't get them from the LLM
+                if chunk_index == 0:  # Only for the first chunk to avoid duplicates
+                    logger.info("Using default topics due to LLM error")
+                    return ["Main Content", "Key Points", "Summary"]
+                return []
+            
+            logger.info(f"Received LLM response for chunk {chunk_index+1} ({len(response)} characters)")
+            logger.debug(f"LLM response preview: {response[:100]}...")
+            
+            # Clean up the response to extract just the JSON array
+            cleaned_response = response.strip()
+            if cleaned_response.startswith("```json"):
+                cleaned_response = cleaned_response.split("```json")[1]
+            if cleaned_response.endswith("```"):
+                cleaned_response = cleaned_response.split("```")[0]
+            
+            # Try to parse as JSON, but handle errors gracefully
+            try:
+                import json
+                topics = json.loads(cleaned_response)
+                if isinstance(topics, list):
+                    logger.info(f"Extracted {len(topics)} topics from chunk {chunk_index+1}")
+                    logger.debug(f"Topics from chunk {chunk_index+1}: {topics}")
+                    return topics
+                else:
+                    logger.warning(f"Expected list but got {type(topics)} from LLM")
+                    # Try to extract topics from text response
+                    return [cleaned_response]
+            except json.JSONDecodeError:
+                logger.warning(f"Could not parse LLM response as JSON: {cleaned_response}")
+                # Try to extract topics from text response
+                lines = cleaned_response.split("\n")
+                potential_topics = [line.strip().strip('",[]') for line in lines if line.strip()]
+                logger.info(f"Extracted {len(potential_topics)} topics from non-JSON response")
+                return potential_topics
+        except Exception as e:
+            logger.error(f"Error calling LLM for chunk {chunk_index+1}: {str(e)}")
+            # Add some default topics if we can't get them from the LLM
+            if chunk_index == 0:  # Only for the first chunk to avoid duplicates
+                logger.info("Using default topics due to exception")
+                return ["Main Content", "Key Points", "Summary"]
+            return []
     
     def post(self):
         """

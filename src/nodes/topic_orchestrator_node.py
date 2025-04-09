@@ -1,11 +1,11 @@
 """
 Topic Processing Orchestrator Node for YouTube Video Summarizer.
-Implements the Map-Reduce pattern for processing topics.
+Implements a Map-Reduce approach for parallel topic processing.
 """
 import sys
 import os
-import concurrent.futures
 from typing import List, Dict, Any
+import concurrent.futures
 
 # Add the project root to the path so we can import from src.utils
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -16,8 +16,8 @@ from src.utils.logger import logger
 
 class TopicOrchestratorNode(BaseNode):
     """
-    Node for orchestrating the Map-Reduce pattern for topic processing.
-    Maps each topic to a TopicProcessorNode and reduces the results.
+    Node for orchestrating parallel processing of topics using Map-Reduce pattern.
+    Maps topics to individual processors and reduces the results.
     """
     
     def __init__(self, shared_memory=None, max_workers=3, questions_per_topic=3):
@@ -59,59 +59,55 @@ class TopicOrchestratorNode(BaseNode):
         self.transcript = self.shared_memory["transcript"]
         
         topics_count = len(self.topics)
-        logger.info(f"Preparing to process {topics_count} topics using Map-Reduce pattern")
+        # Adjust max_workers if there are fewer topics than workers
+        self.max_workers = min(self.max_workers, topics_count)
+        logger.info(f"Preparing to process {topics_count} topics with {self.max_workers} parallel workers")
         logger.debug(f"Topics to process: {self.topics}")
     
     def exec(self):
         """
-        Execute the Map-Reduce pattern for topic processing.
+        Execute Map-Reduce processing for topics.
         """
         if "error" in self.shared_memory:
             return
         
-        # MAP PHASE: Process each topic in parallel
+        # Map phase: Process all topics in parallel
         self._map_phase()
         
-        # REDUCE PHASE: Combine results
+        # Reduce phase: Combine results
         self._reduce_phase()
     
     def _map_phase(self):
         """
-        Map phase: Process each topic in parallel using TopicProcessorNodes.
+        Map phase: Process all topics in parallel using a thread pool.
         """
-        logger.info(f"Starting Map phase with {len(self.topics)} topics")
+        logger.info(f"Starting Map phase with {self.max_workers} workers for {len(self.topics)} topics")
         
-        # Determine the actual number of workers (not more than the number of topics)
-        workers = min(self.max_workers, len(self.topics))
-        logger.debug(f"Using {workers} workers for parallel processing")
+        # Use ThreadPoolExecutor for parallel processing
+        with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+            # Submit all topics for processing
+            future_to_topic = {
+                executor.submit(self._process_topic, topic): topic 
+                for topic in self.topics
+            }
+            
+            # Process results as they complete
+            for future in concurrent.futures.as_completed(future_to_topic):
+                topic = future_to_topic[future]
+                try:
+                    result = future.result()
+                    self.topic_results[topic] = result
+                    logger.info(f"Completed processing for topic: {topic}")
+                except Exception as e:
+                    logger.error(f"Error processing topic '{topic}': {str(e)}")
+                    # Create an empty result for failed topics
+                    self.topic_results[topic] = {
+                        "topic": topic,
+                        "qa_pairs": [],
+                        "eli5_content": f"Error processing topic: {str(e)}"
+                    }
         
-        # Process topics in parallel
-        try:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
-                # Submit all topic processing tasks
-                future_to_topic = {
-                    executor.submit(self._process_topic, topic): topic 
-                    for topic in self.topics
-                }
-                
-                # Collect results as they complete
-                for future in concurrent.futures.as_completed(future_to_topic):
-                    topic = future_to_topic[future]
-                    try:
-                        result = future.result()
-                        self.topic_results[topic] = result
-                        logger.info(f"Completed processing for topic: {topic}")
-                    except Exception as e:
-                        logger.error(f"Error processing topic '{topic}': {str(e)}")
-                        # Create an empty result for failed topics
-                        self.topic_results[topic] = {
-                            "topic": topic,
-                            "qa_pairs": [],
-                            "eli5_content": f"Error processing topic: {str(e)}"
-                        }
-        except Exception as e:
-            logger.error(f"Error in Map phase: {str(e)}")
-            self.shared_memory["error"] = f"Map phase error: {str(e)}"
+        logger.info(f"Map phase complete: Processed {len(self.topic_results)} topics")
     
     def _process_topic(self, topic):
         """
@@ -123,7 +119,7 @@ class TopicOrchestratorNode(BaseNode):
         Returns:
             dict: The processing result
         """
-        logger.info(f"Processing topic in worker thread: {topic}")
+        logger.info(f"Processing topic: {topic}")
         
         # Create and run a TopicProcessorNode for this topic
         processor = TopicProcessorNode(
@@ -132,7 +128,6 @@ class TopicOrchestratorNode(BaseNode):
             questions_per_topic=self.questions_per_topic
         )
         
-        # Run the processor and return the result
         return processor.run()["topic_results"][topic]
     
     def _reduce_phase(self):
@@ -180,7 +175,7 @@ class TopicOrchestratorNode(BaseNode):
             return
         
         logger.info("Topic Orchestrator Node completed successfully")
-        logger.info(f"Processed {len(self.topic_results)} topics with Map-Reduce pattern")
+        logger.info(f"Processed {len(self.topic_results)} topics using Map-Reduce pattern")
 
 
 if __name__ == "__main__":

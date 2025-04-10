@@ -2,6 +2,7 @@
 Utility function to generate HTML output for the YouTube video summary.
 """
 import html
+from src.utils.logger import logger
 
 def generate_html(summary_data):
     """
@@ -16,6 +17,7 @@ def generate_html(summary_data):
             - transformed_content (dict): Transformed content based on selected rubric
             - selected_rubric (dict): Information about the selected transformation rubric
             - audience_level (str): Selected audience sophistication level
+            - knowledge_level (int): Selected knowledge augmentation level (1-10)
             
     Returns:
         str: HTML content as a string
@@ -27,12 +29,24 @@ def generate_html(summary_data):
     metadata = summary_data.get("metadata", {})
     topics = summary_data.get("topics", [])
     qa_pairs = summary_data.get("qa_pairs", {})
+    integrated_content = summary_data.get("integrated_content", "")
     transformed_content = summary_data.get("transformed_content", {})
     selected_rubric = summary_data.get("selected_rubric", {})
     audience_level = summary_data.get("audience_level", "sophisticated")
+    knowledge_level = summary_data.get("knowledge_level", 5)
+    
+    # Limit Q&A pairs to 5 questions if whole_content exists
+    if "whole_content" in qa_pairs and len(qa_pairs["whole_content"]) > 5:
+        qa_pairs["whole_content"] = qa_pairs["whole_content"][:5]
     
     # Check if we have whole content Q&A pairs
-    has_whole_content_qa = "whole_content" in qa_pairs
+    has_whole_content_qa = "whole_content" in qa_pairs and len(qa_pairs["whole_content"]) > 0
+    
+    # Debug log for Q&A pairs
+    if "whole_content" in qa_pairs:
+        logger.info(f"Found {len(qa_pairs['whole_content'])} whole content Q&A pairs")
+    else:
+        logger.warning("No whole content Q&A pairs found in summary_data")
     
     # Escape HTML special characters to prevent XSS
     title = html.escape(metadata.get("title", "YouTube Video Summary"))
@@ -41,6 +55,9 @@ def generate_html(summary_data):
     published_at = html.escape(metadata.get("published_at", ""))
     thumbnail_url = metadata.get("thumbnail_url", "")
     rubric_name = html.escape(selected_rubric.get("name", "Custom Transformation"))
+    
+    # Ensure we're using the user-selected knowledge level, not default
+    knowledge_level = summary_data.get("knowledge_level", 5)
     
     # Generate the HTML content
     html_content = f"""<!DOCTYPE html>
@@ -188,6 +205,16 @@ def generate_html(summary_data):
             margin-left: 10px;
         }}
         
+        .knowledge-badge {{
+            display: inline-block;
+            background-color: #4caf50;
+            color: white;
+            padding: 5px 10px;
+            border-radius: 15px;
+            font-size: 0.9rem;
+            margin-left: 10px;
+        }}
+        
         .whole-content-qa {{
             background-color: var(--card-color);
             border-radius: var(--border-radius);
@@ -213,6 +240,7 @@ def generate_html(summary_data):
             <h1>{title}</h1>
             <div class="rubric-badge">{rubric_name}</div>
             <div class="audience-badge">Audience: {audience_level.capitalize()}</div>
+            <div class="knowledge-badge">Knowledge Level: {knowledge_level}/10</div>
         </header>
         
         <div class="video-info">
@@ -238,11 +266,47 @@ def generate_html(summary_data):
         </div>
 """
 
-    # Add whole content Q&A section if available
+    # Main content section
+    html_content += """
+        <h2>Summary and Key Topics</h2>
+"""
+    
+    # Add integrated content if available, otherwise add topic sections with transformed content
+    if integrated_content:
+        # Display integrated content as a cohesive document
+        content_html = html.escape(integrated_content).replace('\n\n', '</p><p>').replace('\n', '<br>')
+        html_content += f"""
+        <div class="content-block integrated-content">
+            <p>{content_html}</p>
+        </div>
+"""
+    else:
+        # Add topic sections with transformed content
+        for topic in topics:
+            topic_html = html.escape(topic)
+            html_content += f"""
+            <div class="topic-card">
+                <h3>{topic_html}</h3>
+"""
+            
+            # Add transformed content
+            if topic in transformed_content:
+                content_html = html.escape(transformed_content[topic]).replace('\n', '<br>')
+                html_content += f"""
+                <div class="content-block">
+                    {content_html}
+                </div>
+"""
+            
+            html_content += """
+            </div>
+"""
+    
+    # Add Q&A section at the bottom of the page
     if has_whole_content_qa:
         html_content += """
+        <h2>Questions & Answers</h2>
         <div class="whole-content-qa">
-            <h2>Key Questions &amp; Answers</h2>
 """
         for qa_pair in qa_pairs.get("whole_content", []):
             question_html = html.escape(qa_pair.get("question", ""))
@@ -253,46 +317,6 @@ def generate_html(summary_data):
                 <div class="answer">{answer_html}</div>
             </div>
 """
-        html_content += """
-        </div>
-"""
-        
-    html_content += """
-        <h2>Summary and Key Topics</h2>
-"""
-    
-    # Add topic sections with transformed content
-    for topic in topics:
-        topic_html = html.escape(topic)
-        html_content += f"""
-        <div class="topic-card">
-            <h3>{topic_html}</h3>
-"""
-        
-        # Add transformed content
-        if topic in transformed_content:
-            content_html = html.escape(transformed_content[topic]).replace('\n', '<br>')
-            html_content += f"""
-            <div class="content-block">
-                {content_html}
-            </div>
-"""
-        
-        # Add Q&A pairs if we're not using whole content Q&A
-        if not has_whole_content_qa and topic in qa_pairs and qa_pairs[topic]:
-            html_content += """
-            <h4>Questions & Answers</h4>
-"""
-            for qa_pair in qa_pairs[topic]:
-                question_html = html.escape(qa_pair.get("question", ""))
-                answer_html = html.escape(qa_pair.get("answer", "")).replace('\n', '<br>')
-                html_content += f"""
-            <div class="qa-pair">
-                <div class="question">{question_html}</div>
-                <div class="answer">{answer_html}</div>
-            </div>
-"""
-        
         html_content += """
         </div>
 """
@@ -370,7 +394,8 @@ if __name__ == "__main__":
         "selected_rubric": {
             "name": "Simple Transformation"
         },
-        "audience_level": "general"
+        "audience_level": "general",
+        "knowledge_level": 3
     }
     
     html_output = generate_html(test_data)

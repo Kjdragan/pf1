@@ -43,7 +43,8 @@
    - **Map**: Distributes each topic for parallel processing 
    - **Reduce**: Collects and combines all processed topics
 7. **Content Transformation Node**: Applies selected rubric and audience wrapper to transformed content
-8. **HTML Generation Node**: Creates the final HTML output
+8. **Content Integration Node**: Transforms individual topic outputs into a cohesive document
+9. **HTML Generation Node**: Creates the final HTML output
 
 ```mermaid
 flowchart TD
@@ -74,7 +75,8 @@ flowchart TD
     end
     
     combineResults --> audienceNode[Apply Audience Wrapper]
-    audienceNode --> htmlNode[HTML Generation]
+    audienceNode --> integrationNode[Content Integration]
+    integrationNode --> htmlNode[HTML Generation]
 ```
 
 ## Utility Functions
@@ -217,7 +219,15 @@ shared = {
     - *exec*: Apply audience wrapper to adjust content to target sophistication level
     - *post*: Update "transformed_content" in the shared store
 
-9. HTML Generation Node
+9. Content Integration Node
+  - *Purpose*: Transform individual topic outputs into a cohesive document
+  - *Type*: Regular
+  - *Steps*:
+    - *prep*: Read "transformed_content", "topics", and "selected_rubric" from the shared store
+    - *exec*: Call integrate_content to create a cohesive document from individual topic transformations
+    - *post*: Write "integrated_content" to the shared store
+
+10. HTML Generation Node
   - *Purpose*: Create HTML visualization of the summary
   - *Type*: Regular
   - *Steps*:

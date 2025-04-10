@@ -20,6 +20,7 @@ from src.nodes.rubric_recommendation_node import RubricRecommendationNode
 from src.nodes.rubric_selection_node import RubricSelectionNode
 from src.nodes.topic_orchestrator_node import TopicOrchestratorNode
 from src.nodes.audience_wrapper_node import AudienceWrapperNode
+from src.nodes.content_integration_node import ContentIntegrationNode
 from src.nodes.html_generation_node import HTMLGenerationNode
 from src.utils.logger import logger
 
@@ -145,7 +146,7 @@ def run_pipeline(youtube_url, output_dir="output", enable_chunking=False, max_wo
         logger.info(f"Generated {total_qa_pairs} Q&A pairs and {len(transformed_content)} transformed content blocks")
         
         # 7. Audience Wrapper Node
-        logger.info("[7/8] Starting Audience Wrapper Application...")
+        logger.info("[7/9] Starting Audience Wrapper Application...")
         audience_wrapper_node = AudienceWrapperNode(shared_memory)
         shared_memory = audience_wrapper_node.run()
         
@@ -156,8 +157,20 @@ def run_pipeline(youtube_url, output_dir="output", enable_chunking=False, max_wo
         
         logger.info(f"Successfully applied {audience_level} audience wrapper to content")
         
-        # 8. HTML Generation Node
-        logger.info("[8/8] Starting HTML Generation...")
+        # 8. Content Integration Node
+        logger.info("[8/9] Starting Content Integration...")
+        content_integration_node = ContentIntegrationNode(shared_memory)
+        shared_memory = content_integration_node.run()
+        
+        # Check for errors
+        if "error" in shared_memory:
+            logger.error(f"Content Integration failed: {shared_memory['error']}")
+            return shared_memory
+        
+        logger.info("Successfully integrated individual topic transformations into a cohesive document")
+        
+        # 9. HTML Generation Node
+        logger.info("[9/9] Starting HTML Generation...")
         # Create a timestamped filename
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         video_id = shared_memory.get("video_id", "unknown")

@@ -121,15 +121,11 @@ class TopicProcessorNode(BaseNode):
         try:
             logger.debug(f"Applying rubric '{self.selected_rubric['name']}' to topic: {self.topic}")
             
-            # Create empty qa_pairs since we're skipping individual topic Q&A generation
-            mock_qa_pairs = []
-            
             # Format content dictionary as expected by apply_rubric
+            # No need for Q&A pairs since we're not generating them for individual topics
             content = {
                 "topics": [self.topic],
-                "qa_pairs": {
-                    self.topic: mock_qa_pairs
-                }
+                "transcript": self.transcript
             }
             
             # Get knowledge level from the selected rubric if available
@@ -166,11 +162,9 @@ class TopicProcessorNode(BaseNode):
             logger.error(f"Error in Topic Processor Node: {self.shared_memory['error']}")
             return
         
-        qa_pairs_count = len(self.shared_memory.get("qa_pairs", []))
         transformed_content_length = len(self.shared_memory.get("transformed_content", ""))
         
         logger.info(f"Topic Processor completed for: {self.topic}")
-        logger.info(f"Generated {qa_pairs_count} Q&A pairs")
         logger.info(f"Transformed content length: {transformed_content_length} characters")
 
 

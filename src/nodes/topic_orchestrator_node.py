@@ -154,13 +154,14 @@ class TopicOrchestratorNode(BaseNode):
                     combined_qa = generate_whole_content_qa(
                         transcript=self.transcript,
                         topics=self.topics,
-                        questions_count=self.questions_per_topic * len(self.topics)
+                        num_pairs=self.questions_per_topic * len(self.topics)
                     )
                     
-                    # Assign all Q&A pairs to the first topic for simplicity
-                    # This is a placeholder approach - you might want to distribute them differently
-                    if self.topics:
-                        qa_pairs[self.topics[0]] = combined_qa
+                    # Store the combined Q&A under the whole_content key so it's properly displayed
+                    qa_pairs["whole_content"] = combined_qa
+                    
+                    # Also log the Q&A pairs to check they're being stored correctly
+                    logger.info(f"Successfully generated {len(combined_qa)} whole content Q&A pairs")
             
             # Store the combined results in shared memory
             self.shared_memory["qa_pairs"] = qa_pairs

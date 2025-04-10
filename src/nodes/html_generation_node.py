@@ -28,7 +28,12 @@ class HTMLGenerationNode(BaseNode):
         """
         Prepare for execution by checking if all required data exists in shared memory.
         """
-        required_keys = ["video_id", "metadata", "topics", "qa_pairs", "transformed_content"]
+        required_keys = ["video_id", "metadata", "topics", "qa_pairs"]
+        
+        # Check for either transformed_content or integrated_content
+        if "integrated_content" not in self.shared_memory and "transformed_content" not in self.shared_memory:
+            required_keys.append("transformed_content")
+        
         missing_keys = [key for key in required_keys if key not in self.shared_memory]
         
         if missing_keys:
@@ -41,7 +46,12 @@ class HTMLGenerationNode(BaseNode):
             return
         
         logger.info("Preparing to generate HTML summary")
-        logger.debug(f"Found {len(self.shared_memory['topics'])} topics and {len(self.shared_memory['transformed_content'])} transformed content blocks")
+        
+        # Log appropriate information based on what's available
+        if "integrated_content" in self.shared_memory:
+            logger.debug(f"Found integrated content ({len(self.shared_memory['integrated_content'])} characters)")
+        elif "transformed_content" in self.shared_memory:
+            logger.debug(f"Found {len(self.shared_memory['topics'])} topics and {len(self.shared_memory['transformed_content'])} transformed content blocks")
     
     def exec(self):
         """
@@ -56,10 +66,18 @@ class HTMLGenerationNode(BaseNode):
             "metadata": self.shared_memory["metadata"],
             "topics": self.shared_memory["topics"],
             "qa_pairs": self.shared_memory["qa_pairs"],
-            "transformed_content": self.shared_memory["transformed_content"],
             "selected_rubric": self.shared_memory.get("selected_rubric", {}),
-            "audience_level": self.shared_memory.get("audience_level", "sophisticated")
+            "audience_level": self.shared_memory.get("audience_level", "sophisticated"),
+            "knowledge_level": self.shared_memory.get("knowledge_level", 5)
         }
+        
+        # Use integrated_content if available, otherwise use transformed_content
+        if "integrated_content" in self.shared_memory:
+            summary_data["integrated_content"] = self.shared_memory["integrated_content"]
+            logger.info("Using integrated content for HTML generation")
+        else:
+            summary_data["transformed_content"] = self.shared_memory["transformed_content"]
+            logger.info("Using individual topic transformations for HTML generation")
         
         # Generate the HTML content
         logger.debug("Calling generate_html function")

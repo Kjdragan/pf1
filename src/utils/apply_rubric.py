@@ -120,7 +120,7 @@ def apply_rubric(content: Dict[str, Any], rubric_type: str, knowledge_level: int
     Transform content according to the selected rubric.
     
     Args:
-        content (Dict): The content to transform, should contain topics and qa_pairs
+        content (Dict): The content to transform, should contain topics and either qa_pairs or transcript
         rubric_type (str): The rubric type to apply (must match a RubricType enum value)
         knowledge_level (int, optional): Level of external knowledge to incorporate (1-10)
             1: Pure extraction - only information explicitly stated in the video
@@ -149,13 +149,18 @@ def apply_rubric(content: Dict[str, Any], rubric_type: str, knowledge_level: int
     transformed_content = {}
     topics = content.get("topics", [])
     qa_pairs = content.get("qa_pairs", {})
+    transcript = content.get("transcript", "")
     
     # Apply the rubric to each topic
     for topic in topics:
         if topic in qa_pairs:
+            # Use Q&A pairs if available
             transformed_content[topic] = transform_topic(topic, qa_pairs[topic], rubric_type, knowledge_level)
+        elif transcript:
+            # Use transcript directly if no Q&A pairs but transcript is available
+            transformed_content[topic] = transform_topic_from_transcript(topic, transcript, rubric_type, knowledge_level)
         else:
-            logger.warning(f"Missing Q&A pairs for topic: {topic}")
+            logger.warning(f"Missing both Q&A pairs and transcript for topic: {topic}")
     
     logger.info(f"Successfully transformed {len(transformed_content)} topics using {rubric_type} rubric")
     return {"transformed_content": transformed_content}
@@ -212,6 +217,57 @@ Keep your response focused on the transformed content only.
         logger.exception(f"Error transforming topic {topic}: {str(e)}")
         # Return a fallback transformation
         return f"## {topic}\n\n" + "\n\n".join([f"**{qa['question']}**\n\n{qa['answer']}" for qa in qa_pairs])
+
+def transform_topic_from_transcript(topic: str, transcript: str, rubric_type: str, knowledge_level: int) -> str:
+    """
+    Transform a single topic using the transcript directly (without Q&A pairs).
+    
+    Args:
+        topic (str): The topic to transform
+        transcript (str): The video transcript
+        rubric_type (str): The rubric type to apply
+        knowledge_level (int): Level of external knowledge to incorporate (1-10)
+        
+    Returns:
+        str: The transformed content for the topic
+    """
+    # Get the appropriate prompt for the selected rubric
+    rubric_prompt = RUBRIC_PROMPTS[rubric_type]
+    
+    # Create knowledge level guidance based on the level
+    knowledge_guidance = get_knowledge_level_guidance(knowledge_level)
+    
+    # Prepare the prompt for the LLM
+    prompt = f"""
+You are an expert content transformer. Given a topic and a video transcript,
+transform this content according to the specified rubric.
+
+Topic: {topic}
+
+Video Transcript:
+{transcript[:2000]}... [transcript continues]
+
+Transformation Rubric Instructions:
+{rubric_prompt}
+
+Knowledge Augmentation Level: {knowledge_level}/10
+{knowledge_guidance}
+
+Focus on extracting and transforming content related to the topic '{topic}' from the transcript.
+Transform the content while maintaining accuracy and the original meaning.
+Keep your response focused on the transformed content only.
+"""
+    
+    try:
+        # Call the LLM to transform the content
+        transformed = call_llm(prompt)
+        logger.debug(f"Successfully transformed topic from transcript: {topic}")
+        return transformed
+        
+    except Exception as e:
+        logger.exception(f"Error transforming topic {topic} from transcript: {str(e)}")
+        # Return a fallback transformation
+        return f"## {topic}\n\nUnable to transform content for this topic. Please check the transcript for information related to {topic}."
 
 def get_knowledge_level_guidance(level: int) -> str:
     """

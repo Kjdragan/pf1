@@ -116,21 +116,34 @@ class TopicExtractionNode(BaseNode):
         """
         logger.info(f"Processing chunk {chunk_index+1}/{len(self.chunks)}...")
         
-        # Create prompt for topic extraction
+        # Create prompt for topic extraction that processes the entire transcript
+        # For longer transcripts, we'll use a strategic sampling approach
+        if len(chunk) > 10000:
+            # For very long transcripts, take samples from beginning, middle and end
+            begin_sample = chunk[:3000]
+            middle_start = len(chunk) // 2 - 1500
+            middle_sample = chunk[middle_start:middle_start + 3000]
+            end_sample = chunk[-3000:]
+            chunk_sample = f"{begin_sample}\n\n[...middle of transcript...]\n\n{middle_sample}\n\n[...additional content...]\n\n{end_sample}"
+        else:
+            # For shorter transcripts, use the whole thing
+            chunk_sample = chunk
+            
         prompt = textwrap.dedent(f"""
         You are an expert at analyzing video content and identifying main topics.
         
         I'll provide you with a transcript from a YouTube video. Your task is to:
-        1. Identify the main topics discussed in this segment
+        1. Identify the MAIN TOPICS discussed in the ENTIRE video
         2. List each topic as a short, clear phrase (3-7 words)
         3. Provide at most {self.max_topics} topics
-        4. Focus on substantive content, not introductions or conclusions
+        4. Focus on substantive content, not just introductions or background information
+        5. Consider the ENTIRE transcript when identifying topics, not just the beginning
         
-        Here is the transcript segment:
+        Here is the transcript:
         
-        {chunk[:2000]}...
+        {chunk_sample}
         
-        Respond with ONLY a JSON array of topic strings. For example:
+        Respond with ONLY a JSON array of topic strings that represent the main subjects of the entire video. For example:
         ["Topic One", "Topic Two", "Topic Three"]
         """)
         

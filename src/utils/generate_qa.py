@@ -3,16 +3,33 @@ Utility to generate Q&A pairs for topics extracted from video content.
 
 This module takes topics and transcript data to generate relevant
 question and answer pairs that enhance understanding of the video content.
+Uses OpenAI's structured output capabilities to ensure consistent formatting.
 """
 
 import json
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
+from pydantic import BaseModel, Field
+from openai import OpenAI
 from .call_llm import call_llm
 from src.utils.logger import logger
+
+# Initialize OpenAI client
+client = OpenAI()
+
+# Define Pydantic models for Q&A pairs
+class QAPair(BaseModel):
+    """Model for a question and answer pair"""
+    question: str = Field(..., description="Clear, specific question about the topic")
+    answer: str = Field(..., description="Detailed, specific answer with information from the transcript")
+
+class QAPairList(BaseModel):
+    """Model for a list of Q&A pairs"""
+    qa_pairs: List[QAPair] = Field(..., description="List of question and answer pairs")
 
 def generate_qa_pairs(topic: str, transcript: str, num_pairs: int = 3) -> List[Dict[str, str]]:
     """
     Generate Q&A pairs for a specific topic based on the video transcript.
+    Uses OpenAI's structured output capabilities for reliable formatting.
     
     Args:
         topic (str): The topic to generate Q&A pairs for
@@ -27,95 +44,80 @@ def generate_qa_pairs(topic: str, transcript: str, num_pairs: int = 3) -> List[D
     # Create a sample of the transcript if it's too long
     transcript_sample = transcript[:5000] if len(transcript) > 5000 else transcript
     
-    # Prepare a prompt for the LLM
-    prompt = f"""
-You are an expert educational content creator. Given a topic and video transcript,
-generate {num_pairs} insightful question and answer pairs that:
-1. Focus specifically on the topic "{topic}"
-2. Cover key information present in the transcript
-3. Progress from fundamental to more advanced understanding
-4. Are clear, concise, and educational
-5. PROVIDE ACTUAL ANSWERS based on the transcript, not placeholders
-
-Video Transcript Sample:
-{transcript_sample}
-
-For the topic "{topic}", create {num_pairs} question and answer pairs.
-
-IMPORTANT INSTRUCTIONS:
-- PROVIDE SPECIFIC, DETAILED ANSWERS based on the transcript content
-- Do NOT create placeholder or template answers like "This would explain..."
-- Each answer should be 3-5 sentences with specific information from the transcript
-- Focus on factual information that appears in the transcript
-- If the transcript doesn't provide enough information, state what IS known
-
-Your response MUST follow this exact format:
-```json
-[
-  {{
-    "question": "Clear, specific question about the topic",
-    "answer": "Detailed, specific answer with information from the transcript."
-  }},
-  ...additional Q&A pairs...
-]
-```
-
-CRITICAL REQUIREMENTS:
-1. Start your response with ```json
-2. End your response with ```
-3. Use ONLY valid JSON with double quotes around keys and string values
-4. Do not include any text outside the JSON code block
-5. Do not use single quotes or trailing commas
-6. If you're unsure about answering a question, provide an answer based on what IS in the transcript, rather than a placeholder
-"""
-    
     try:
-        # Call the LLM to generate Q&A pairs
-        response = call_llm(prompt)
+        # Use OpenAI's Responses API with structured output
+        response = client.responses.create(
+            model="gpt-4o",
+            input=[
+                {"role": "system", "content": f"You are an expert educational content creator. Focus specifically on the topic '{topic}'. Generate {num_pairs} insightful question and answer pairs that cover key information from the transcript. Each answer should be 3-5 sentences with specific information."},
+                {"role": "user", "content": f"For the topic '{topic}', create {num_pairs} question and answer pairs based on this transcript sample:\n\n{transcript_sample}"}
+            ],
+            text={
+                "format": {
+                    "type": "json_schema",
+                    "name": "topic_qa_pairs",
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "qa_pairs": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "question": {
+                                            "type": "string", 
+                                            "description": f"Clear, specific question about {topic}"
+                                        },
+                                        "answer": {
+                                            "type": "string",
+                                            "description": "Detailed, specific answer with information from the transcript"
+                                        }
+                                    },
+                                    "required": ["question", "answer"],
+                                    "additionalProperties": False
+                                }
+                            }
+                        },
+                        "required": ["qa_pairs"],
+                        "additionalProperties": False
+                    },
+                    "strict": True
+                }
+            }
+        )
         
-        try:
-            # Extract JSON from response if wrapped in markdown code blocks
-            if "```json" in response and "```" in response.split("```json", 1)[1]:
-                json_str = response.split("```json", 1)[1].split("```", 1)[0].strip()
-            elif "```" in response:
-                # Try to extract from any code block
-                json_str = response.split("```", 1)[1].split("```", 1)[0].strip()
-            else:
-                # Use the whole response if no code blocks are found
-                json_str = response.strip()
+        # Parse the structured output response
+        qa_results = json.loads(response.output_text)
+        qa_pairs = qa_results.get("qa_pairs", [])
+        
+        # Verify we got the expected format
+        if qa_pairs and len(qa_pairs) > 0:
+            logger.info(f"Generated {len(qa_pairs)} Q&A pairs for topic: {topic} using structured output")
             
-            # Parse the JSON response
-            qa_pairs = json.loads(json_str)
-            logger.info(f"Successfully generated {len(qa_pairs)} Q&A pairs for topic: {topic}")
-            
-            # Validate the structure of each Q&A pair
-            valid_qa_pairs = []
-            for pair in qa_pairs:
-                if isinstance(pair, dict) and "question" in pair and "answer" in pair:
-                    valid_qa_pairs.append(pair)
-                else:
-                    logger.warning(f"Skipping invalid Q&A pair format: {pair}")
-            
-            if valid_qa_pairs:
-                return valid_qa_pairs
-            else:
-                logger.warning(f"No valid Q&A pairs found for topic: {topic}")
-                return get_fallback_qa_pairs(topic)
-            
-        except json.JSONDecodeError as json_err:
-            logger.error(f"Failed to parse LLM response as JSON for topic: {topic}. Error: {str(json_err)}")
-            logger.debug(f"Response that failed parsing: {response[:200]}...")
-            # Create a fallback response
+            # Limit to requested number of pairs
+            if len(qa_pairs) > num_pairs:
+                qa_pairs = qa_pairs[:num_pairs]
+                
+            return qa_pairs
+        else:
+            logger.warning(f"No valid Q&A pairs found for topic: {topic}")
             return get_fallback_qa_pairs(topic)
             
     except Exception as e:
         logger.exception(f"Error generating Q&A pairs for topic {topic}: {str(e)}")
+        # If we have error details, log them
+        if hasattr(e, 'response') and hasattr(e.response, 'json'):
+            try:
+                logger.error(f"API error details: {e.response.json()}")
+            except:
+                pass
         return get_fallback_qa_pairs(topic)
 
 def generate_whole_content_qa(topics: List[str], transcript: str, num_pairs: int = 5) -> List[Dict[str, str]]:
     """
     Generate Q&A pairs for the entire content based on all topics and the transcript.
     This produces more comprehensive Q&A pairs that span across multiple topics.
+    Uses OpenAI's structured output capabilities for reliable formatting.
     
     Args:
         topics (List[str]): List of all topics extracted from the video
@@ -130,94 +132,76 @@ def generate_whole_content_qa(topics: List[str], transcript: str, num_pairs: int
     # Create a sample of the transcript if it's too long
     transcript_sample = transcript[:6000] if len(transcript) > 6000 else transcript
     
-    # Format the topics list for inclusion in the prompt
-    topics_text = json.dumps(topics)
-    
-    # Prepare a prompt for the LLM
-    prompt = f"""
-You are an expert educational content creator. Given a set of topics and a video transcript,
-generate {num_pairs} comprehensive question and answer pairs that:
-1. Cover the main themes across ALL topics
-2. Address important connections between topics
-3. Progress from basic to advanced understanding
-4. Include specific information and details from the transcript
-5. Provide substantial, informative answers (not templates or placeholders)
-
-Video Topics: {topics_text}
-
-Video Transcript Sample:
-{transcript_sample}
-
-Create {num_pairs} insightful question and answer pairs that span across these topics.
-
-IMPORTANT INSTRUCTIONS:
-- PROVIDE SPECIFIC, DETAILED ANSWERS based on the transcript content
-- Each answer should be 4-6 sentences with specific information from the transcript
-- Focus on cross-cutting themes that connect multiple topics
-- Include factual details mentioned in the transcript, not generic information
-- Address the most important aspects of the video content
-
-Your response MUST follow this exact format:
-```json
-[
-  {{
-    "question": "Clear, specific question about important themes in the video",
-    "answer": "Detailed, comprehensive answer with specific information from the transcript."
-  }},
-  ...additional Q&A pairs...
-]
-```
-
-CRITICAL REQUIREMENTS:
-1. Start your response with ```json
-2. End your response with ```
-3. Use ONLY valid JSON with double quotes around keys and string values
-4. Do not include any text outside the JSON code block
-5. Do not use single quotes or trailing commas
-6. If you're unsure about answering a question, provide an answer based on what IS in the transcript, rather than a placeholder
-"""
+    # Format the topics list for a cleaner prompt
+    topics_text = ", ".join(topics)
     
     try:
-        # Call the LLM to generate Q&A pairs
-        response = call_llm(prompt)
+        # Use OpenAI's Responses API with structured output
+        response = client.responses.create(
+            model="gpt-4o",
+            input=[
+                {"role": "system", "content": f"You are an expert educational content creator. Generate {num_pairs} comprehensive Q&A pairs that cover the main themes across these topics: {topics_text}. Each answer should be 4-6 sentences with specific information from the transcript."},
+                {"role": "user", "content": f"Create {num_pairs} insightful question and answer pairs for these topics based on this transcript sample:\n\n{transcript_sample}"}
+            ],
+            text={
+                "format": {
+                    "type": "json_schema",
+                    "name": "qa_pairs",
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "qa_pairs": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "question": {
+                                            "type": "string", 
+                                            "description": "Clear, specific question about important themes in the video"
+                                        },
+                                        "answer": {
+                                            "type": "string",
+                                            "description": "Detailed, comprehensive answer with specific information from the transcript"
+                                        }
+                                    },
+                                    "required": ["question", "answer"],
+                                    "additionalProperties": False
+                                }
+                            }
+                        },
+                        "required": ["qa_pairs"],
+                        "additionalProperties": False
+                    },
+                    "strict": True
+                }
+            }
+        )
         
-        try:
-            # Extract JSON from response if wrapped in markdown code blocks
-            if "```json" in response and "```" in response.split("```json", 1)[1]:
-                json_str = response.split("```json", 1)[1].split("```", 1)[0].strip()
-            elif "```" in response:
-                # Try to extract from any code block
-                json_str = response.split("```", 1)[1].split("```", 1)[0].strip()
-            else:
-                # Use the whole response if no code blocks are found
-                json_str = response.strip()
+        # Parse the structured output response
+        qa_results = json.loads(response.output_text)
+        qa_pairs = qa_results.get("qa_pairs", [])
+        
+        # Verify we got the expected format
+        if qa_pairs and len(qa_pairs) > 0:
+            logger.info(f"Successfully generated {len(qa_pairs)} comprehensive Q&A pairs using structured output")
             
-            # Parse the JSON response
-            qa_pairs = json.loads(json_str)
-            logger.info(f"Successfully generated {len(qa_pairs)} comprehensive Q&A pairs")
-            
-            # Validate the structure of each Q&A pair
-            valid_qa_pairs = []
-            for pair in qa_pairs:
-                if isinstance(pair, dict) and "question" in pair and "answer" in pair:
-                    valid_qa_pairs.append(pair)
-                else:
-                    logger.warning(f"Skipping invalid Q&A pair format: {pair}")
-            
-            if valid_qa_pairs:
-                return valid_qa_pairs
-            else:
-                logger.warning("No valid comprehensive Q&A pairs found")
-                return get_fallback_comprehensive_qa(topics)
-            
-        except json.JSONDecodeError as json_err:
-            logger.error(f"Failed to parse LLM response as JSON for comprehensive Q&A. Error: {str(json_err)}")
-            logger.debug(f"Response that failed parsing: {response[:200]}...")
-            # Create a fallback response
+            # Limit to requested number of pairs
+            if len(qa_pairs) > num_pairs:
+                qa_pairs = qa_pairs[:num_pairs]
+                
+            return qa_pairs
+        else:
+            logger.warning("No valid Q&A pairs found in structured output response")
             return get_fallback_comprehensive_qa(topics)
             
     except Exception as e:
         logger.exception(f"Error generating comprehensive Q&A pairs: {str(e)}")
+        # If we have error details, log them
+        if hasattr(e, 'response') and hasattr(e.response, 'json'):
+            try:
+                logger.error(f"API error details: {e.response.json()}")
+            except:
+                pass
         return get_fallback_comprehensive_qa(topics)
 
 def get_fallback_qa_pairs(topic: str) -> List[Dict[str, str]]:

@@ -189,5 +189,9 @@ class RubricSelectionNode(BaseNode):
         self.shared_memory["selected_rubric"] = self.selected_rubric
         self.shared_memory["audience_level"] = self.audience_level
         
+        # Make sure knowledge level is stored as a top-level key in shared memory
+        self.shared_memory["knowledge_level"] = self.selected_rubric.get("knowledge_level", 5)
+        logger.info(f"Knowledge level {self.shared_memory['knowledge_level']} saved to shared memory")
+        
         # Log completion
         logger.info(f"Rubric selection completed: {self.selected_rubric['name']}, Knowledge Level: {self.selected_rubric.get('knowledge_level', 5)}/10, Audience: {self.audience_level}")

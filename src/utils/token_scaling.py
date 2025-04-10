@@ -11,8 +11,8 @@ from typing import Dict, Any, Optional, Union
 def calculate_max_tokens(
     content_length: int, 
     content_type: str = "transcript",
-    min_tokens: int = 200,
-    max_tokens: int = 4000,
+    min_tokens: int = 220,    # 10% increase from 200
+    max_tokens: int = 4400,   # 10% increase from 4000
     base_tokens: Optional[int] = None
 ) -> int:
     """
@@ -31,11 +31,11 @@ def calculate_max_tokens(
     # Define default base tokens by content type if not specified
     if base_tokens is None:
         base_tokens_map = {
-            "transcript": 1000,    # Default for transcript processing
-            "topic": 500,          # Default for topic processing
-            "qa": 800,             # Default for Q&A generation
-            "summary": 1200,       # Default for summary generation
-            "default": 1000        # Default fallback
+            "transcript": 1100,    # Default for transcript processing (10% increase)
+            "topic": 550,          # Default for topic processing (10% increase)
+            "qa": 880,             # Default for Q&A generation (10% increase)
+            "summary": 1320,       # Default for summary generation (10% increase)
+            "default": 1100        # Default fallback (10% increase)
         }
         base_tokens = base_tokens_map.get(content_type, base_tokens_map["default"])
     
@@ -82,26 +82,26 @@ def get_token_limits_for_transcript(transcript_length: int) -> Dict[str, int]:
         "topic_extraction": calculate_max_tokens(
             transcript_length, 
             content_type="topic", 
-            min_tokens=200, 
-            max_tokens=1000
+            min_tokens=220,     # 10% increase from 200
+            max_tokens=1100     # 10% increase from 1000
         ),
         "content_transformation": calculate_max_tokens(
             transcript_length, 
             content_type="transcript", 
-            min_tokens=800, 
-            max_tokens=4000
+            min_tokens=880,     # 10% increase from 800
+            max_tokens=4400     # 10% increase from 4000
         ),
         "qa_generation": calculate_max_tokens(
             transcript_length, 
             content_type="qa", 
-            min_tokens=500, 
-            max_tokens=2000
+            min_tokens=550,     # 10% increase from 500
+            max_tokens=2200     # 10% increase from 2000
         ),
         "summary": calculate_max_tokens(
             transcript_length, 
             content_type="summary", 
-            min_tokens=600, 
-            max_tokens=3000
+            min_tokens=660,     # 10% increase from 600
+            max_tokens=3300     # 10% increase from 3000
         )
     }
 

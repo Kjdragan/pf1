@@ -50,43 +50,6 @@ class CostTrackingNode(BaseNode):
             logger.info("Generating cost tracking report")
             cost_report = generate_cost_report(global_metrics)
             
-            # Add projections if enabled
-            if self.include_projections:
-                summary = global_metrics.get_summary()
-                avg_input_tokens = 0
-                avg_output_tokens = 0
-                
-                if summary["total_api_calls"] > 0:
-                    avg_input_tokens = summary["total_input_tokens"] / summary["total_api_calls"]
-                    avg_output_tokens = summary["total_output_tokens"] / summary["total_api_calls"]
-                
-                # Estimate future usage based on current patterns
-                potential_savings = calculate_potential_savings(
-                    total_calls=summary["total_api_calls"] * 10,  # Project for more usage
-                    avg_input_tokens=avg_input_tokens,
-                    avg_output_tokens=avg_output_tokens,
-                    cacheable_percentage=0.8,  # Estimate 80% of calls could use caching
-                    avg_cache_hit_rate=0.7  # Estimate 70% cache hit rate with optimization
-                )
-                
-                # Add projection to the report
-                projection_report = f"""
-## Usage Projections
-
-Based on current usage patterns, with wider implementation of prompt caching:
-
-- Projected baseline cost for next {self.projection_days} days: ${potential_savings['baseline_cost_usd']}
-- Projected optimized cost for next {self.projection_days} days: ${potential_savings['optimized_cost_usd']}
-- Potential additional savings: ${potential_savings['potential_savings_usd']} ({potential_savings['savings_percentage']}%)
-
-These projections assume:
-- {potential_savings['cacheable_calls']} cacheable calls
-- {potential_savings['avg_cache_hit_rate']*100:.1f}% cache hit rate
-- Current usage scaled by 10x to simulate production load
-"""
-                
-                cost_report += projection_report
-            
             # Store the report in shared memory
             self.shared_memory["cost_report"] = cost_report
             self.shared_memory["cost_metrics"] = global_metrics.get_summary()

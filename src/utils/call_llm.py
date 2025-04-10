@@ -5,6 +5,9 @@ Provides both standard calls and structured output capabilities with optimizatio
 import os
 import time
 import json
+import logging
+import inspect
+import traceback
 from typing import Dict, Any, List, Optional, Union
 from openai import OpenAI
 from openai import OpenAIError
@@ -14,6 +17,7 @@ import logging
 from .calculate_llm_costs import global_metrics
 # Import token scaling utility
 from .token_scaling import calculate_max_tokens
+from .prompt_logger import log_prompt, start_new_log_file
 
 def create_cacheable_prompt(static_instructions: str, dynamic_content: str) -> str:
     """
@@ -86,6 +90,19 @@ def call_llm(
                     content_type=content_type
                 )
                 logging.debug(f"Dynamically calculated max_tokens: {max_tokens} for content_length {content_length} and type {content_type}")
+            
+            # Log the prompt before making the API call
+            log_prompt(
+                prompt=prompt,
+                model=model,
+                function_name=inspect.stack()[1].function,
+                metadata={
+                    "max_tokens": max_tokens,
+                    "temperature": temperature,
+                    "content_type": content_type,
+                    "content_length": content_length
+                }
+            )
             
             # Make the API call
             response = client.chat.completions.create(

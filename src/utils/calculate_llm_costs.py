@@ -171,10 +171,6 @@ def generate_cost_report(metrics: CostMetrics) -> str:
 - Estimated cost: ${summary['estimated_cost_usd']}
 - Estimated savings: ${summary['estimated_savings_usd']}
 - Savings percentage: {summary['savings_percentage']}%
-
-## Projection
-- Monthly cost (30x current usage): ${summary['estimated_cost_usd']*30:.2f}
-- Monthly savings (30x current usage): ${summary['estimated_savings_usd']*30:.2f}
 """
     
     return report

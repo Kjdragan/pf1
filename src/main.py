@@ -22,9 +22,10 @@ from src.nodes.topic_orchestrator_node import TopicOrchestratorNode
 from src.nodes.audience_wrapper_node import AudienceWrapperNode
 from src.nodes.content_integration_node import ContentIntegrationNode
 from src.nodes.html_generation_node import HTMLGenerationNode
+from src.nodes.cost_tracking_node import CostTrackingNode
 from src.utils.logger import logger
 
-def run_pipeline(youtube_url, output_dir="output", enable_chunking=False, max_workers=3, no_qa=False, whole_qa=False):
+def run_pipeline(youtube_url, output_dir="output", enable_chunking=False, max_workers=3, no_qa=False, whole_qa=False, track_costs=True):
     """
     Run the complete YouTube video summarization pipeline.
     
@@ -44,6 +45,7 @@ def run_pipeline(youtube_url, output_dir="output", enable_chunking=False, max_wo
     logger.info(f"Parallel Workers: {max_workers}")
     logger.info(f"No Q&A: {no_qa}")
     logger.info(f"Whole Q&A: {whole_qa}")
+    logger.info(f"Cost Tracking: {'Enabled' if track_costs else 'Disabled'}")
     logger.info(f"{'='*60}")
     
     # Initialize shared memory
@@ -170,7 +172,7 @@ def run_pipeline(youtube_url, output_dir="output", enable_chunking=False, max_wo
         logger.info("Successfully integrated individual topic transformations into a cohesive document")
         
         # 9. HTML Generation Node
-        logger.info("[9/9] Starting HTML Generation...")
+        logger.info("[9/10] Starting HTML Generation...")
         # Create a timestamped filename
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         video_id = shared_memory.get("video_id", "unknown")
@@ -194,6 +196,34 @@ def run_pipeline(youtube_url, output_dir="output", enable_chunking=False, max_wo
         logger.info(f"Transformation Rubric: {shared_memory.get('selected_rubric', {}).get('name', 'Unknown')}")
         logger.info(f"Audience Level: {shared_memory.get('audience_level', 'sophisticated')}")
         logger.info(f"Output File: {output_file}")
+        
+        # 10. Cost Tracking Node (optional)
+        if track_costs:
+            logger.info("[10/10] Starting Cost Tracking...")
+            # Add projections based on content length
+            content_length = len(shared_memory.get('transcript', ''))
+            projection_days = 30
+            if content_length > 30000:
+                projection_days = 15  # For very long content, project shorter period
+            
+            cost_tracking_node = CostTrackingNode({
+                **shared_memory,
+                "reset_metrics": False,  # Keep accumulating metrics across runs
+                "include_projections": True,
+                "projection_days": projection_days
+            })
+            
+            shared_memory = cost_tracking_node.run()
+            
+            # Check for errors
+            if "error" in shared_memory:
+                logger.error(f"Cost Tracking failed: {shared_memory['error']}")
+                # Continue anyway, not critical
+            else:
+                metrics = shared_memory.get("cost_metrics", {})
+                logger.info(f"Cost Summary: ${metrics.get('estimated_cost_usd', 0)} (Savings: ${metrics.get('estimated_savings_usd', 0)})")
+                logger.info(f"Cost Report: {shared_memory.get('cost_report_filename', 'Not generated')}")
+        
         logger.info(f"{'='*60}")
         
         return shared_memory
@@ -214,6 +244,7 @@ def main():
     parser.add_argument("--workers", "-w", type=int, default=3, help="Number of parallel workers for topic processing")
     parser.add_argument("--no-qa", action="store_true", help="Disable generation of Q&A pairs")
     parser.add_argument("--whole-qa", action="store_true", help="Generate comprehensive Q&A for entire content instead of per-topic")
+    parser.add_argument("--no-cost-track", action="store_true", help="Disable cost tracking")
     
     args = parser.parse_args()
     
@@ -225,7 +256,7 @@ def main():
     logger.info(f"Starting YouTube Video Summarizer with URL: {youtube_url}")
     
     # Run the pipeline
-    run_pipeline(youtube_url, args.output, args.chunk, args.workers, args.no_qa, args.whole_qa)
+    run_pipeline(youtube_url, args.output, args.chunk, args.workers, args.no_qa, args.whole_qa, not args.no_cost_track)
 
 if __name__ == "__main__":
     main()

@@ -8,7 +8,7 @@ specified rubric type, structuring and formatting the information appropriately.
 import json
 from enum import Enum
 from typing import Dict, List, Any
-from .call_llm import call_llm
+from .call_llm import call_llm, call_llm_cached
 from src.utils.logger import logger
 
 class RubricType(Enum):
@@ -187,30 +187,36 @@ def transform_topic(topic: str, qa_pairs: List[Dict], rubric_type: str, knowledg
     # Create knowledge level guidance based on the level
     knowledge_guidance = get_knowledge_level_guidance(knowledge_level)
     
-    # Prepare the prompt for the LLM
-    prompt = f"""
-You are an expert content transformer. Given a topic and its Q&A pairs from a video,
-transform this content according to the specified rubric.
-
-Topic: {topic}
-
-Q&A Content:
-{formatted_qa}
-
-Transformation Rubric Instructions:
-{rubric_prompt}
-
-Knowledge Augmentation Level: {knowledge_level}/10
-{knowledge_guidance}
-
-Transform the content while maintaining accuracy and the original meaning.
-Keep your response focused on the transformed content only.
-"""
+    # Separate static instructions from dynamic content for caching optimization
+    static_instructions = f"""
+    You are an expert at summarizing and transforming content according to specific formats.
+    
+    I will provide you with a topic and a set of questions and answers about that topic.
+    Your task is to transform this into a coherent piece of content following these guidelines:
+    
+    {RUBRIC_PROMPTS.get(rubric_type, RUBRIC_PROMPTS[RubricType.INSIGHTFUL_CONVERSATIONAL.value])}
+    
+    {knowledge_guidance}
+    
+    Create a well-structured section about this topic based on the Q&A content.
+    Focus on presenting the information coherently rather than preserving the Q&A format.
+    """
+    
+    # Dynamic content that changes for each topic and Q&A pair set
+    dynamic_content = f"""
+    Topic: {topic}
+    
+    Q&A Pairs:
+    {qa_text}
+    """
     
     try:
-        # Call the LLM to transform the content
-        transformed = call_llm(prompt)
-        logger.debug(f"Successfully transformed topic: {topic}")
+        # Call the LLM using caching-optimized function
+        transformed = call_llm_cached(
+            static_instructions=static_instructions,
+            dynamic_content=dynamic_content
+        )
+        logger.debug(f"Successfully transformed Q&A for topic: {topic}")
         return transformed
         
     except Exception as e:
@@ -237,30 +243,37 @@ def transform_topic_from_transcript(topic: str, transcript: str, rubric_type: st
     # Create knowledge level guidance based on the level
     knowledge_guidance = get_knowledge_level_guidance(knowledge_level)
     
-    # Prepare the prompt for the LLM
-    prompt = f"""
-You are an expert content transformer. Given a topic and a video transcript,
-transform this content according to the specified rubric.
-
-Topic: {topic}
-
-Video Transcript:
-{transcript[:2000]}... [transcript continues]
-
-Transformation Rubric Instructions:
-{rubric_prompt}
-
-Knowledge Augmentation Level: {knowledge_level}/10
-{knowledge_guidance}
-
-Focus on extracting and transforming content related to the topic '{topic}' from the transcript.
-Transform the content while maintaining accuracy and the original meaning.
-Keep your response focused on the transformed content only.
-"""
+    # Separate static instructions from dynamic content for caching optimization
+    static_instructions = f"""
+    You are an expert at summarizing and transforming video content according to specific formats.
+    
+    I will provide you with a topic and a transcript from a video.
+    Your task is to extract and transform content related to this topic following these guidelines:
+    
+    {RUBRIC_PROMPTS.get(rubric_type, RUBRIC_PROMPTS[RubricType.INSIGHTFUL_CONVERSATIONAL.value])}
+    
+    {knowledge_guidance}
+    
+    Based on the transcript, create a well-structured section about this topic.
+    If the topic isn't explicitly covered in the transcript, focus on the most relevant related information.
+    Keep your response focused on the transformed content only.
+    """
+    
+    # Dynamic content that changes for each topic and transcript
+    transcript_excerpt = transcript[:2000] + "..." if len(transcript) > 2000 else transcript
+    dynamic_content = f"""
+    Topic: {topic}
+    
+    Transcript:
+    {transcript_excerpt}
+    """
     
     try:
-        # Call the LLM to transform the content
-        transformed = call_llm(prompt)
+        # Call the LLM using caching-optimized function
+        transformed = call_llm_cached(
+            static_instructions=static_instructions,
+            dynamic_content=dynamic_content
+        )
         logger.debug(f"Successfully transformed topic from transcript: {topic}")
         return transformed
         

@@ -10,7 +10,7 @@ import json
 from typing import Dict, List, Any, Optional
 from pydantic import BaseModel, Field
 from openai import OpenAI
-from .call_llm import call_llm
+from .call_llm import call_llm, call_llm_cached
 from src.utils.logger import logger
 
 # Initialize OpenAI client
@@ -101,7 +101,75 @@ def generate_qa_pairs(topic: str, transcript: str, num_pairs: int = 3) -> List[D
             return qa_pairs
         else:
             logger.warning(f"No valid Q&A pairs found for topic: {topic}")
-            return get_fallback_qa_pairs(topic)
+            # Fall back to traditional method if structured output fails
+            logger.warning(f"Structured output failed for topic '{topic}', falling back to traditional method with caching optimization")
+            
+            # Create static instructions for Q&A generation (cacheable part)
+            static_instructions = f"""
+            You are an expert at creating educational content.
+            
+            Generate {num_pairs} question and answer pairs about the provided topic based on a transcript.
+            
+            For each pair:
+            1. Create a clear, specific question about the topic
+            2. Provide a detailed answer using information from the transcript
+            3. Make each answer 3-5 sentences with specific details
+            
+            Format your response as a JSON array with 'question' and 'answer' keys for each pair.
+            Example format:
+            [{{
+              "question": "What is [topic]?",
+              "answer": "Answer to the question about [topic]..."
+            }}, {{...}}]
+            """
+            
+            # Dynamic content that will change with each topic and transcript
+            dynamic_content = f"""
+            Generate Q&A pairs for this specific topic: '{topic}'
+            
+            Using this transcript:
+            {transcript_sample}
+            """
+            
+            try:
+                # Call the LLM using caching-optimized function
+                response = call_llm_cached(
+                    static_instructions=static_instructions,
+                    dynamic_content=dynamic_content,
+                    temperature=0.3
+                )
+                
+                # Parse the response to extract Q&A pairs
+                try:
+                    # Clean up the response to handle potential formatting issues
+                    cleaned = response.strip()
+                    if cleaned.startswith("```json"):
+                        cleaned = cleaned.split("```json")[1]
+                    if cleaned.endswith("```"):
+                        cleaned = cleaned.rsplit("```", 1)[0]
+                    cleaned = cleaned.strip()
+                    
+                    # Attempt to parse the response as JSON
+                    qa_pairs = json.loads(cleaned)
+                    
+                    # Verify the expected format
+                    if isinstance(qa_pairs, list) and len(qa_pairs) > 0:
+                        logger.info(f"Generated {len(qa_pairs)} Q&A pairs for topic: {topic} using traditional method with caching optimization")
+                        
+                        # Limit to requested number of pairs
+                        if len(qa_pairs) > num_pairs:
+                            qa_pairs = qa_pairs[:num_pairs]
+                            
+                        return qa_pairs
+                    else:
+                        logger.warning(f"Failed to parse Q&A pairs for topic: {topic} using traditional method with caching optimization")
+                        return get_fallback_qa_pairs(topic)
+                except json.JSONDecodeError:
+                    logger.warning(f"Failed to parse Q&A pairs for topic: {topic} using traditional method with caching optimization")
+                    return get_fallback_qa_pairs(topic)
+            except Exception as e:
+                logger.exception(f"Error generating Q&A pairs for topic {topic} using traditional method with caching optimization: {str(e)}")
+                return get_fallback_qa_pairs(topic)
             
     except Exception as e:
         logger.exception(f"Error generating Q&A pairs for topic {topic}: {str(e)}")
@@ -132,15 +200,12 @@ def generate_whole_content_qa(topics: List[str], transcript: str, num_pairs: int
     # Create a sample of the transcript if it's too long
     transcript_sample = transcript[:6000] if len(transcript) > 6000 else transcript
     
-    # Format the topics list for a cleaner prompt
-    topics_text = ", ".join(topics)
-    
     try:
         # Use OpenAI's Responses API with structured output
         response = client.responses.create(
             model="gpt-4o",
             input=[
-                {"role": "system", "content": f"You are an expert educational content creator. Generate {num_pairs} comprehensive Q&A pairs that cover the main themes across these topics: {topics_text}. Each answer should be 4-6 sentences with specific information from the transcript."},
+                {"role": "system", "content": f"You are an expert educational content creator. Generate {num_pairs} comprehensive Q&A pairs that cover the main themes across these topics: {', '.join(topics)}. Each answer should be 4-6 sentences with specific information from the transcript."},
                 {"role": "user", "content": f"Create {num_pairs} insightful question and answer pairs for these topics based on this transcript sample:\n\n{transcript_sample}"}
             ],
             text={

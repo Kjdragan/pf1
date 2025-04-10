@@ -11,7 +11,7 @@ from typing import List, Dict, Any
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from src.nodes.base_node import BaseNode
-from src.utils.call_llm import call_llm
+from src.utils.call_llm import call_llm, call_llm_cached
 from src.utils.logger import logger
 
 class TopicExtractionNode(BaseNode):
@@ -116,8 +116,7 @@ class TopicExtractionNode(BaseNode):
         """
         logger.info(f"Processing chunk {chunk_index+1}/{len(self.chunks)}...")
         
-        # Create prompt for topic extraction that processes the entire transcript
-        # For longer transcripts, we'll use a strategic sampling approach
+        # For longer transcripts, use a strategic sampling approach
         if len(chunk) > 10000:
             # For very long transcripts, take samples from beginning, middle and end
             begin_sample = chunk[:3000]
@@ -128,8 +127,9 @@ class TopicExtractionNode(BaseNode):
         else:
             # For shorter transcripts, use the whole thing
             chunk_sample = chunk
-            
-        prompt = textwrap.dedent(f"""
+        
+        # Separate static instructions (which can be cached) from dynamic content (the transcript)
+        static_instructions = textwrap.dedent(f"""
         You are an expert at analyzing video content and identifying main topics.
         
         I'll provide you with a transcript from a YouTube video. Your task is to:
@@ -139,18 +139,27 @@ class TopicExtractionNode(BaseNode):
         4. Focus on substantive content, not just introductions or background information
         5. Consider the ENTIRE transcript when identifying topics, not just the beginning
         
-        Here is the transcript:
-        
-        {chunk_sample}
-        
         Respond with ONLY a JSON array of topic strings that represent the main subjects of the entire video. For example:
         ["Topic One", "Topic Two", "Topic Three"]
         """)
         
+        # Define the dynamic content (the transcript) which will be placed after the static instructions
+        dynamic_content = f"Here is the transcript:\n\n{chunk_sample}"
+        
+        # Make API call using optimized caching function and extract topics
+        logger.debug(f"Sending prompt to LLM for topic extraction using caching optimization")
+        
         # Call LLM to extract topics
         try:
-            logger.info(f"Calling LLM for chunk {chunk_index+1} (timeout: 30s)...")
-            response = call_llm(prompt, temperature=0.3, max_tokens=200, timeout=30)
+            logger.info(f"Calling LLM for chunk {chunk_index+1} with caching optimization...")
+            response = call_llm_cached(
+                static_instructions=static_instructions, 
+                dynamic_content=dynamic_content, 
+                temperature=0.3,
+                max_tokens=200,  # Smaller max_tokens for a concise list
+                timeout=30
+            )
+            logger.debug(f"Received {len(response)} character response from LLM")
             
             # Check if we got an error response
             if response.startswith("Error:"):

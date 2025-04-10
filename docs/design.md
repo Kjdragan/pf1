@@ -17,6 +17,8 @@
 8. As a user, I want content that matches a sophisticated audience level, not oriented toward children
 9. As a user, I want to see the content transformed according to the selected rubric
 10. As a user, I want to control how much external knowledge is incorporated into the content transformation
+11. As a user, I want the system to optimize costs when using LLM APIs
+12. As a user, I want to see metrics on API costs and potential savings from optimizations
 
 ## Flow Design
 
@@ -45,6 +47,7 @@
 7. **Content Transformation Node**: Applies selected rubric and audience wrapper to transformed content
 8. **Content Integration Node**: Transforms individual topic outputs into a cohesive document
 9. **HTML Generation Node**: Creates the final HTML output
+10. **Cost Tracking Node**: Tracks API costs and calculates potential savings from optimizations
 
 ```mermaid
 flowchart TD
@@ -77,6 +80,7 @@ flowchart TD
     combineResults --> audienceNode[Apply Audience Wrapper]
     audienceNode --> integrationNode[Content Integration]
     integrationNode --> htmlNode[HTML Generation]
+    htmlNode --> costNode[Cost Tracking]
 ```
 
 ## Utility Functions
@@ -101,16 +105,22 @@ flowchart TD
    - Used by the Content Extraction Node to get the video transcript
 
 4. **Call LLM** (`utils/call_llm.py`)
-   - *Input*: prompt (str)
+   - *Input*: prompt (str), model (str), temperature (float), max_tokens (int, optional), content_length (int, optional), content_type (str)
    - *Output*: response (str)
-   - Used by multiple nodes for LLM tasks (topic extraction, Q&A generation, rubric transformation)
+   - Used by multiple nodes to interact with the language model
+   - Implements dynamic token scaling based on content length
 
-5. **HTML Generator** (`utils/generate_html.py`)
-   - *Input*: summary_data (dict) containing all processed information
-   - *Output*: html_content (str)
-   - Used by the HTML Generation Node to create the final output
+5. **Token Scaling** (`utils/token_scaling.py`)
+   - *Input*: content_length (int), content_type (str), min_tokens (int), max_tokens (int)
+   - *Output*: calculated_max_tokens (int)
+   - Used by Call LLM utility to dynamically scale token limits based on content length
 
-6. **Recommend Rubric** (`utils/recommend_rubric.py`)
+7. **Calculate LLM Costs** (`utils/calculate_llm_costs.py`)
+    - *Input*: input_tokens (int), output_tokens (int), cached_tokens (int), model (str)
+    - *Output*: cost metrics and savings calculations
+    - Used by Cost Tracking Node to monitor and report on API costs
+
+8. **Recommend Rubric** (`utils/recommend_rubric.py`)
    - *Input*: transcript (str), topics (list)
    - *Output*: recommended_rubrics (list) with confidence scores and justifications
    - Used by the Rubric Recommendation Node to suggest appropriate transformation styles
@@ -235,6 +245,14 @@ shared = {
     - *exec*: Call generate_html to create HTML output based on selected rubric
     - *post*: Write "html_output" to the shared store
 
+11. Cost Tracking Node
+  - *Purpose*: Track and report on LLM API costs and potential savings
+  - *Type*: Regular
+  - *Steps*:
+    - *prep*: No specific prerequisites needed
+    - *exec*: Generate cost report based on tracked API usage
+    - *post*: Write "cost_report" and "cost_metrics" to the shared store
+
 ## Document Transformation Rubrics
 
 The system supports the following transformation rubrics:
@@ -308,3 +326,33 @@ The system applies an audience sophistication wrapper that can be configured to 
 - **Sophisticated** (Default): University-level education vocabulary, direct, occasional wit, analytical depth
 - **General**: Mainstream audience, balanced vocabulary, neutral tone
 - **Child**: Simplified language, concrete examples (used for ELI5 rubric)
+
+## Dynamic Token Scaling
+
+The system implements dynamic token scaling to optimize the token limits for LLM calls based on content length:
+
+- **Short Content** (≤ 5,000 chars): Base token limits apply
+- **Medium Content** (5,000-15,000 chars): Moderately increased token limits
+- **Long Content** (15,000-30,000 chars): Significantly increased token limits
+- **Very Long Content** (≥ 30,000 chars): Maximum token limits with logarithmic scaling
+
+Each content type has appropriate default token ranges:
+- **Topic Extraction**: 200-1,000 tokens
+- **Q&A Generation**: 500-2,000 tokens
+- **Content Transformation**: 800-4,000 tokens
+- **Summary Generation**: 600-3,000 tokens
+
+## Cost Optimization
+
+The system implements several cost optimization strategies:
+
+1. **Prompt Caching**: Structures prompts to maximize OpenAI's caching mechanism by separating static instructions from dynamic content
+2. **Dynamic Token Scaling**: Allocates appropriate token limits based on content length to avoid over-provisioning
+3. **Cost Tracking**: Monitors API usage, calculates costs, and reports on potential savings
+
+The system generates detailed cost reports including:
+- Total API calls and token usage statistics
+- Cache hit rate and percentage
+- Estimated costs in USD
+- Current savings from optimizations
+- Projected future savings with wider implementation

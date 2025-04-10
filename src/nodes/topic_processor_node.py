@@ -31,6 +31,7 @@ class TopicProcessorNode(BaseNode):
                 - selected_rubric: The selected rubric information
                 - questions_per_topic: Number of questions to generate per topic
                 - no_qa (optional): Whether to disable Q&A generation
+                - knowledge_level (optional): The knowledge level for the topic
         """
         super().__init__(shared_memory or {})
         self.topic = self.shared_memory.get("topic")
@@ -38,6 +39,7 @@ class TopicProcessorNode(BaseNode):
         self.selected_rubric = self.shared_memory.get("selected_rubric")
         self.questions_per_topic = self.shared_memory.get("questions_per_topic", 3)
         self.no_qa = self.shared_memory.get("no_qa", False)
+        self.knowledge_level = self.shared_memory.get("knowledge_level")
         logger.debug(f"TopicProcessorNode initialized for topic: {self.topic}")
     
     def prep(self):
@@ -75,11 +77,8 @@ class TopicProcessorNode(BaseNode):
         
         # Process the topic
         try:
-            # Generate Q&A pairs if not disabled
+            # Skip Q&A generation for individual topics
             qa_pairs = []
-            if not self.no_qa:
-                qa_pairs = self._generate_qa_pairs()
-                logger.info(f"Generated {len(qa_pairs)} Q&A pairs for topic: {self.topic}")
             
             # Apply the selected rubric
             transformed_content = self._apply_rubric_transformation()
@@ -119,13 +118,11 @@ class TopicProcessorNode(BaseNode):
         Returns:
             str: The transformed content
         """
-        logger.info(f"Applying rubric '{self.selected_rubric['name']}' to topic: {self.topic}")
-        
         try:
-            # Generate mock Q&A content to pass to apply_rubric
+            logger.debug(f"Applying rubric '{self.selected_rubric['name']}' to topic: {self.topic}")
+            
+            # Create empty qa_pairs since we're skipping individual topic Q&A generation
             mock_qa_pairs = []
-            if not self.no_qa:
-                mock_qa_pairs = self._generate_qa_pairs()
             
             # Format content dictionary as expected by apply_rubric
             content = {
@@ -135,10 +132,21 @@ class TopicProcessorNode(BaseNode):
                 }
             }
             
+            # Get knowledge level from the selected rubric if available
+            knowledge_level = None
+            if self.selected_rubric and 'knowledge_level' in self.selected_rubric:
+                knowledge_level = self.selected_rubric['knowledge_level']
+            elif self.knowledge_level is not None:
+                knowledge_level = self.knowledge_level
+            
+            # Log the knowledge level being used
+            logger.debug(f"Using knowledge level: {knowledge_level if knowledge_level is not None else 'default'}")
+            
             # Call the apply_rubric utility with correct parameters
             transformed = apply_rubric(
                 content=content,
-                rubric_type=self.selected_rubric.get("rubric_id", "insightful_conversational")
+                rubric_type=self.selected_rubric.get("rubric_id", "insightful_conversational"),
+                knowledge_level=knowledge_level
             )
             
             # Extract the transformed content for this topic

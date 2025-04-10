@@ -24,6 +24,23 @@ class RubricType(Enum):
     KEY_QUOTES = "key_quotes"
     ELI5 = "eli5"
 
+# Default knowledge augmentation levels for each rubric (1-10 scale)
+# 1: Pure extraction/summarization - only information explicitly stated in the video
+# 5: Balanced approach - mostly video content with some contextual information
+# 10: Heavy augmentation - extensive external knowledge and analysis
+DEFAULT_KNOWLEDGE_LEVELS = {
+    RubricType.INSIGHTFUL_CONVERSATIONAL.value: 5,
+    RubricType.ANALYTICAL_NARRATIVE.value: 7, 
+    RubricType.EDUCATIONAL_EXTRACTION.value: 6,
+    RubricType.STRUCTURED_DIGEST.value: 4,
+    RubricType.EMOTION_CONTEXT_RICH.value: 3,
+    RubricType.TOP_N_KNOWLEDGE.value: 5,
+    RubricType.CHECKLIST_ACTIONABLE.value: 6,
+    RubricType.CONTRARIAN_INSIGHTS.value: 8,
+    RubricType.KEY_QUOTES.value: 1,
+    RubricType.ELI5.value: 5
+}
+
 # Rubric prompts that guide the LLM in applying each transformation style
 RUBRIC_PROMPTS = {
     RubricType.INSIGHTFUL_CONVERSATIONAL.value: """
@@ -98,13 +115,16 @@ Transform the content into an ELI5 (Explain Like I'm Five) format that:
 """
 }
 
-def apply_rubric(content: Dict[str, Any], rubric_type: str) -> Dict[str, Any]:
+def apply_rubric(content: Dict[str, Any], rubric_type: str, knowledge_level: int = None) -> Dict[str, Any]:
     """
     Transform content according to the selected rubric.
     
     Args:
         content (Dict): The content to transform, should contain topics and qa_pairs
         rubric_type (str): The rubric type to apply (must match a RubricType enum value)
+        knowledge_level (int, optional): Level of external knowledge to incorporate (1-10)
+            1: Pure extraction - only information explicitly stated in the video
+            10: Heavy augmentation - extensive external knowledge and analysis
         
     Returns:
         Dict: The transformed content
@@ -117,6 +137,15 @@ def apply_rubric(content: Dict[str, Any], rubric_type: str) -> Dict[str, Any]:
         rubric_type = RubricType.INSIGHTFUL_CONVERSATIONAL.value
         logger.info(f"Falling back to default rubric: {rubric_type}")
     
+    # Use default knowledge level if not specified
+    if knowledge_level is None:
+        knowledge_level = DEFAULT_KNOWLEDGE_LEVELS.get(rubric_type, 5)
+    else:
+        # Ensure knowledge_level is within valid range
+        knowledge_level = max(1, min(10, knowledge_level))
+    
+    logger.info(f"Using knowledge augmentation level: {knowledge_level}/10")
+    
     transformed_content = {}
     topics = content.get("topics", [])
     qa_pairs = content.get("qa_pairs", {})
@@ -124,14 +153,14 @@ def apply_rubric(content: Dict[str, Any], rubric_type: str) -> Dict[str, Any]:
     # Apply the rubric to each topic
     for topic in topics:
         if topic in qa_pairs:
-            transformed_content[topic] = transform_topic(topic, qa_pairs[topic], rubric_type)
+            transformed_content[topic] = transform_topic(topic, qa_pairs[topic], rubric_type, knowledge_level)
         else:
             logger.warning(f"Missing Q&A pairs for topic: {topic}")
     
     logger.info(f"Successfully transformed {len(transformed_content)} topics using {rubric_type} rubric")
     return {"transformed_content": transformed_content}
 
-def transform_topic(topic: str, qa_pairs: List[Dict], rubric_type: str) -> str:
+def transform_topic(topic: str, qa_pairs: List[Dict], rubric_type: str, knowledge_level: int) -> str:
     """
     Transform a single topic's Q&A pairs according to the selected rubric.
     
@@ -139,6 +168,7 @@ def transform_topic(topic: str, qa_pairs: List[Dict], rubric_type: str) -> str:
         topic (str): The topic to transform
         qa_pairs (List[Dict]): List of Q&A pairs for the topic
         rubric_type (str): The rubric type to apply
+        knowledge_level (int): Level of external knowledge to incorporate (1-10)
         
     Returns:
         str: The transformed content for the topic
@@ -148,6 +178,9 @@ def transform_topic(topic: str, qa_pairs: List[Dict], rubric_type: str) -> str:
     
     # Get the appropriate prompt for the selected rubric
     rubric_prompt = RUBRIC_PROMPTS[rubric_type]
+    
+    # Create knowledge level guidance based on the level
+    knowledge_guidance = get_knowledge_level_guidance(knowledge_level)
     
     # Prepare the prompt for the LLM
     prompt = f"""
@@ -161,6 +194,9 @@ Q&A Content:
 
 Transformation Rubric Instructions:
 {rubric_prompt}
+
+Knowledge Augmentation Level: {knowledge_level}/10
+{knowledge_guidance}
 
 Transform the content while maintaining accuracy and the original meaning.
 Keep your response focused on the transformed content only.
@@ -176,6 +212,58 @@ Keep your response focused on the transformed content only.
         logger.exception(f"Error transforming topic {topic}: {str(e)}")
         # Return a fallback transformation
         return f"## {topic}\n\n" + "\n\n".join([f"**{qa['question']}**\n\n{qa['answer']}" for qa in qa_pairs])
+
+def get_knowledge_level_guidance(level: int) -> str:
+    """
+    Generate guidance text for the specified knowledge augmentation level.
+    
+    Args:
+        level (int): Knowledge augmentation level (1-10)
+        
+    Returns:
+        str: Guidance text for the LLM
+    """
+    if level <= 2:
+        return """
+IMPORTANT: Use ONLY information explicitly stated in the video content.
+- Do NOT add any external knowledge, context, or analysis
+- Focus exclusively on summarizing/organizing what was directly said or shown
+- If the content lacks information on a topic, simply note that it wasn't covered
+- NEVER make assumptions or fill in gaps with external knowledge
+"""
+    elif level <= 4:
+        return """
+IMPORTANT: Primarily use information from the video content (approximately 80-90%).
+- Add minimal external context ONLY when necessary to clarify concepts mentioned in the video
+- Clearly mark any added context with [Context: ...]
+- Focus on organizing and presenting what was actually in the video
+- Keep external additions brief and only for clarification purposes
+"""
+    elif level <= 6:
+        return """
+IMPORTANT: Balance video content (approximately 70%) with helpful contextual information.
+- Add moderate external context to enhance understanding of concepts in the video
+- Clearly distinguish between video content and added information
+- Use phrases like "Additionally, ..." or "For context, ..." to introduce external knowledge
+- Ensure the video's core content remains the primary focus
+"""
+    elif level <= 8:
+        return """
+IMPORTANT: Enhance video content (approximately 50-60%) with substantial contextual information.
+- Add significant external knowledge to place the video in broader context
+- Use clear section breaks or formatting to distinguish video content from added information
+- Develop concepts mentioned briefly in the video with additional explanation
+- Create a comprehensive resource that extends beyond the original video
+"""
+    else:  # 9-10
+        return """
+IMPORTANT: Create a comprehensive resource using the video as a starting point.
+- Extensively augment the video content (which may be 30-40% of the final output)
+- Add detailed explanations, examples, and related concepts not mentioned in the video
+- Organize content logically, which may differ from the video's structure
+- Develop a thorough treatment of the topic that goes well beyond the original video
+- Always maintain a section that summarizes what was actually in the original video
+"""
 
 if __name__ == "__main__":
     # Simple test case

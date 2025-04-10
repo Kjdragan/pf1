@@ -15,43 +15,53 @@ from src.utils.logger import logger
 RUBRICS = {
     "insightful_conversational": {
         "name": "Insightful Conversational Summary",
-        "description": "Moderate compression preserving conversational tone, authentic voice, retains quotes and key analogies"
+        "description": "Moderate compression preserving conversational tone, authentic voice, retains quotes and key analogies",
+        "default_knowledge_level": 5
     },
     "analytical_narrative": {
         "name": "Analytical Narrative Transformation",
-        "description": "Adds analytical commentary clearly separate from original ideas, preserves core arguments"
+        "description": "Adds analytical commentary clearly separate from original ideas, preserves core arguments",
+        "default_knowledge_level": 7
     },
     "educational_extraction": {
         "name": "In-depth Educational Extraction",
-        "description": "Lower compression, aimed at replicating detailed educational content, preserves definitions and concepts"
+        "description": "Lower compression, aimed at replicating detailed educational content, preserves definitions and concepts",
+        "default_knowledge_level": 6
     },
     "structured_digest": {
         "name": "Structured Knowledge Digest",
-        "description": "High compression, concise knowledge delivery, organized bullet points, clear headings"
+        "description": "High compression, concise knowledge delivery, organized bullet points, clear headings",
+        "default_knowledge_level": 4
     },
     "emotion_context_rich": {
         "name": "Emotion and Context-rich Narration",
-        "description": "Captures emotional depth, authentic voice, and nuanced context, emphasizes emotional narrative"
+        "description": "Captures emotional depth, authentic voice, and nuanced context, emphasizes emotional narrative",
+        "default_knowledge_level": 3
     },
     "top_n_knowledge": {
         "name": "Top N Knowledge Extraction",
-        "description": "Summarize content into enumerated, prioritized lists, maintains sophisticated language"
+        "description": "Summarize content into enumerated, prioritized lists, maintains sophisticated language",
+        "default_knowledge_level": 5
     },
     "checklist_actionable": {
         "name": "Checklist or Actionable Summary",
-        "description": "Provide concise, actionable steps, structured as task-oriented checklists"
+        "description": "Provide concise, actionable steps, structured as task-oriented checklists",
+        "default_knowledge_level": 6
     },
     "contrarian_insights": {
         "name": "Contrarian Insights (Myth-Busting)",
-        "description": "Identify and clarify misconceptions explicitly, structured as myths versus realities"
+        "description": "Identify and clarify misconceptions explicitly, structured as myths versus realities",
+        "default_knowledge_level": 8
     },
     "key_quotes": {
         "name": "Key Quotes or Notable Statements",
-        "description": "Extract direct quotes preserving exact original wording and impact, minimal compression"
+        "description": "Extract direct quotes preserving exact original wording and impact, minimal compression",
+        "default_knowledge_level": 1
     },
     "eli5": {
         "name": "ELI5 (Explain Like I'm Five)",
-        "description": "Simplify complex topics for beginner understanding, simple language and basic analogies"
+        "description": "Simplify complex topics for beginner understanding, simple language and basic analogies",
+        "default_knowledge_level": 5
     }
 }
 
@@ -75,7 +85,15 @@ def recommend_rubric(transcript: str, topics: List[str]) -> List[Dict]:
     prompt = f"""
 You are an expert content analyst. Given a video transcript and its main topics, 
 recommend the most appropriate document transformation rubrics from the provided list.
-For each recommendation, provide a confidence score (0-100) and a brief justification.
+For each recommendation, provide a confidence score (0-100), a brief justification,
+and a suggested knowledge augmentation level (1-10).
+
+Knowledge Augmentation Level Scale:
+1-2: Pure extraction - only information explicitly stated in the video
+3-4: Minimal augmentation - mostly video content with minimal context
+5-6: Balanced approach - video content with helpful contextual information
+7-8: Significant augmentation - video content enhanced with substantial external knowledge
+9-10: Heavy augmentation - extensive external knowledge and analysis
 
 Video Transcript Sample:
 {transcript_sample}
@@ -91,6 +109,7 @@ For each recommendation, provide:
 1. The rubric ID (key from the available rubrics)
 2. A confidence score (0-100)
 3. A brief justification explaining why this rubric is appropriate for this content
+4. A suggested knowledge augmentation level (1-10) based on the content type
 
 Your response MUST follow this exact format:
 ```json
@@ -98,18 +117,12 @@ Your response MUST follow this exact format:
   {{
     "rubric_id": "rubric_key",
     "confidence": 85,
-    "justification": "Brief explanation of why this rubric is appropriate"
+    "justification": "Brief explanation of why this rubric is appropriate",
+    "knowledge_level": 5
   }},
-  ...additional recommendations...
+  ...
 ]
 ```
-
-CRITICAL REQUIREMENTS:
-1. Start your response with ```json
-2. End your response with ```
-3. Use ONLY valid JSON with double quotes around keys and string values
-4. Do not include any text outside the JSON code block
-5. Do not use single quotes or trailing commas
 """
     
     try:
@@ -145,6 +158,13 @@ CRITICAL REQUIREMENTS:
                         rec["confidence"] = int(rec["confidence"])
                     else:
                         rec["confidence"] = 70  # Default confidence
+                    
+                    # Ensure knowledge_level is an integer between 1-10
+                    if "knowledge_level" in rec and isinstance(rec["knowledge_level"], (int, float)):
+                        rec["knowledge_level"] = max(1, min(10, int(rec["knowledge_level"])))
+                    else:
+                        # Use the default knowledge level for this rubric
+                        rec["knowledge_level"] = RUBRICS[rec["rubric_id"]].get("default_knowledge_level", 5)
                         
                     validated_recommendations.append(rec)
                 else:
@@ -183,21 +203,24 @@ def get_default_recommendations() -> List[Dict]:
             "name": RUBRICS["insightful_conversational"]["name"],
             "description": RUBRICS["insightful_conversational"]["description"],
             "confidence": 80,
-            "justification": "Default recommendation as this format works well for most content types."
+            "justification": "Default recommendation as this format works well for most content types.",
+            "knowledge_level": RUBRICS["insightful_conversational"]["default_knowledge_level"]
         },
         {
             "rubric_id": "structured_digest",
             "name": RUBRICS["structured_digest"]["name"],
             "description": RUBRICS["structured_digest"]["description"],
             "confidence": 75,
-            "justification": "Default recommendation as this provides clear, organized information."
+            "justification": "Default recommendation as this provides clear, organized information.",
+            "knowledge_level": RUBRICS["structured_digest"]["default_knowledge_level"]
         },
         {
             "rubric_id": "eli5",
             "name": RUBRICS["eli5"]["name"],
             "description": RUBRICS["eli5"]["description"],
             "confidence": 70,
-            "justification": "Default recommendation as simplified explanations are useful for complex topics."
+            "justification": "Default recommendation as simplified explanations are useful for complex topics.",
+            "knowledge_level": RUBRICS["eli5"]["default_knowledge_level"]
         }
     ]
     

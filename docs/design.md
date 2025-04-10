@@ -16,6 +16,7 @@
 7. As a user, I want the system to recommend appropriate rubrics based on the video content
 8. As a user, I want content that matches a sophisticated audience level, not oriented toward children
 9. As a user, I want to see the content transformed according to the selected rubric
+10. As a user, I want to control how much external knowledge is incorporated into the content transformation
 
 ## Flow Design
 
@@ -29,7 +30,7 @@
 2. **Map-Reduce**: 
    - **Map Phase**: We'll process each topic independently in parallel
    - **Reduce Phase**: We'll combine the results from all topics into a final summary
-3. **Agent Pattern**: We'll use LLM inference to recommend appropriate rubrics for content transformation
+3. **Agent Pattern**: We'll use LLM inference to recommend appropriate rubrics for content transformation and generate Q&A pairs
 
 ### Flow high-level Design:
 
@@ -37,7 +38,7 @@
 2. **Content Extraction Node**: Downloads the video transcript/captions
 3. **Topic Extraction Node**: Identifies main topics from the transcript
 4. **Rubric Recommendation Node**: Analyzes content and suggests appropriate transformation rubrics
-5. **Rubric Selection Node**: Facilitates user selection of preferred transformation rubric
+5. **Rubric Selection Node**: Facilitates user selection of preferred transformation rubric and knowledge level
 6. **Topic Processing Orchestrator Node**: Coordinates the Map-Reduce pattern for topic processing
    - **Map**: Distributes each topic for parallel processing 
    - **Reduce**: Collects and combines all processed topics
@@ -113,9 +114,9 @@ flowchart TD
    - Used by the Rubric Recommendation Node to suggest appropriate transformation styles
 
 7. **Apply Rubric** (`utils/apply_rubric.py`)
-   - *Input*: content (str), rubric_type (enum)
+   - *Input*: content (str), rubric_type (enum), knowledge_level (int, optional)
    - *Output*: transformed_content (str)
-   - Used by the Content Transformation Node to transform content according to selected rubric
+   - Used by the Content Transformation Node to transform content according to selected rubric and knowledge level
 
 8. **Apply Audience Wrapper** (`utils/apply_audience_wrapper.py`)
    - *Input*: content (str), audience_level (enum)
@@ -184,11 +185,11 @@ shared = {
     - *post*: Write "recommended_rubrics" to the shared store
 
 5. Rubric Selection Node
-  - *Purpose*: Facilitate user selection of preferred transformation rubric
+  - *Purpose*: Facilitate user selection of preferred transformation rubric and knowledge level
   - *Type*: Regular
   - *Steps*:
     - *prep*: Read "recommended_rubrics" from the shared store
-    - *exec*: Present options and capture user selection
+    - *exec*: Present options and capture user selection for rubric and knowledge level
     - *post*: Write "selected_rubric" and "audience_level" to the shared store
 
 6. Topic Processing Orchestrator Node
@@ -231,42 +232,64 @@ The system supports the following transformation rubrics:
 1. **Insightful Conversational Summary**
    - *Purpose*: Moderate compression preserving conversational tone
    - *Characteristics*: Authentic voice, moderate length, retains quotes and key analogies
+   - *Default Knowledge Level*: 5 (Balanced approach)
 
 2. **Analytical Narrative Transformation**
    - *Purpose*: Adds analytical commentary clearly separate from original ideas
    - *Characteristics*: Moderate compression, preserves core arguments, explicitly includes analytical insights
+   - *Default Knowledge Level*: 7 (Moderate augmentation)
 
 3. **In-depth Educational Extraction**
    - *Purpose*: Lower compression, aimed at replicating detailed educational content
    - *Characteristics*: Preserves definitions, concepts, and examples with original phrasing
+   - *Default Knowledge Level*: 6 (Above average augmentation)
 
 4. **Structured Knowledge Digest**
    - *Purpose*: High compression, concise knowledge delivery
    - *Characteristics*: Organized bullet points, clear headings, prioritization of insights
+   - *Default Knowledge Level*: 4 (Below average augmentation)
 
 5. **Emotion and Context-rich Narration**
    - *Purpose*: Captures emotional depth, authentic voice, and nuanced context
    - *Characteristics*: Moderate compression, emphasizes emotional and personal narrative
+   - *Default Knowledge Level*: 3 (Low augmentation)
 
 6. **"Top N" Knowledge Extraction**
    - *Purpose*: Summarize content into enumerated, prioritized lists
    - *Characteristics*: Clear ordering, concise summaries, maintains sophisticated language
+   - *Default Knowledge Level*: 5 (Balanced approach)
 
 7. **Checklist or Actionable Summary**
    - *Purpose*: Provide concise, actionable steps
    - *Characteristics*: Structured as task-oriented checklists, highly practical
+   - *Default Knowledge Level*: 6 (Above average augmentation)
 
 8. **Contrarian Insights (Myth-Busting)**
    - *Purpose*: Identify and clarify misconceptions explicitly
    - *Characteristics*: Structured clearly as myths versus realities, direct language
+   - *Default Knowledge Level*: 8 (High augmentation)
 
 9. **Key Quotes or Notable Statements**
    - *Purpose*: Extract direct quotes preserving exact original wording and impact
    - *Characteristics*: Minimal compression, high impact quotes
+   - *Default Knowledge Level*: 1 (Pure extraction)
 
 10. **ELI5 (Explain Like I'm Five)**
     - *Purpose*: Simplify complex topics for beginner understanding
     - *Characteristics*: Simple language, basic analogies, concrete examples
+    - *Default Knowledge Level*: 5 (Balanced approach)
+
+## Knowledge Augmentation Scale
+
+The system provides a knowledge augmentation scale (1-10) to control how much external knowledge is incorporated into content transformations:
+
+- **Level 1-2**: Pure extraction - only information explicitly stated in the video
+- **Level 3-4**: Minimal augmentation - mostly video content with minimal context
+- **Level 5-6**: Balanced approach - video content with helpful contextual information
+- **Level 7-8**: Significant augmentation - video content enhanced with substantial external knowledge
+- **Level 9-10**: Heavy augmentation - extensive external knowledge and analysis
+
+Each rubric has a default knowledge level, but users can customize it during the rubric selection process.
 
 ## Audience Sophistication Wrapper
 

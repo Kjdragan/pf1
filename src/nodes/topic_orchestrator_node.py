@@ -92,66 +92,88 @@ class TopicOrchestratorNode(BaseNode):
         
         # Dictionary to hold all Q&A pairs organized by topic
         qa_pairs = {}
-        # Dictionary to hold all transformed content organized by topic
+        
+        # Dictionary to hold transformed content for each topic
         transformed_content = {}
         
-        # Process topics in parallel using a thread pool (Map phase)
         try:
+            # MAP phase: Process each topic in parallel
             with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-                # Create a dictionary mapping futures to their topics
-                futures = {
+                # Create a future for each topic
+                future_to_topic = {
                     executor.submit(
                         self._process_topic, 
                         topic, 
                         self.transcript, 
                         self.selected_rubric,
                         self.questions_per_topic,
-                        self.no_qa
+                        True  # Force no_qa to True for individual topics
                     ): topic for topic in self.topics
                 }
                 
-                # Process results as they complete
-                for future in concurrent.futures.as_completed(futures):
-                    topic = futures[future]
+                # Process the results as they complete
+                for future in concurrent.futures.as_completed(future_to_topic):
+                    topic = future_to_topic[future]
                     try:
                         result = future.result()
+                        # Store the results
                         self.topic_results[topic] = result
-                        
-                        # Extract Q&A pairs and transformed content
-                        if not self.no_qa and not self.whole_qa:
-                            qa_pairs[topic] = result.get("qa_pairs", [])
-                        transformed_content[topic] = result.get("transformed_content", "")
-                        
-                        logger.info(f"Successfully processed topic: {topic}")
+                        transformed_content[topic] = result["transformed_content"]
+                        # We're not collecting individual topic Q&A pairs anymore
                     except Exception as e:
-                        logger.exception(f"Error processing topic {topic}: {str(e)}")
-                        # Continue with other topics on error
-        
+                        error_msg = f"Error processing topic '{topic}': {str(e)}"
+                        logger.exception(error_msg)
+                        self.shared_memory["error"] = error_msg
+                        return
+            
+            # REDUCE phase: Combine the results
+            logger.info("All topics processed, combining results")
+            
+            # Only generate Q&A for the combined content if not disabled
+            if not self.no_qa:
+                if self.whole_qa:
+                    # Generate comprehensive Q&A for the entire content
+                    logger.info("Generating comprehensive Q&A for the entire content")
+                    whole_content_qa = generate_whole_content_qa(
+                        transcript=self.transcript,
+                        topics=self.topics,
+                        questions_count=self.questions_per_topic * len(self.topics)
+                    )
+                    
+                    # Distribute the Q&A pairs across topics
+                    qa_count = len(whole_content_qa)
+                    qa_per_topic = max(1, qa_count // len(self.topics))
+                    
+                    for i, topic in enumerate(self.topics):
+                        start_idx = i * qa_per_topic
+                        end_idx = start_idx + qa_per_topic if i < len(self.topics) - 1 else qa_count
+                        qa_pairs[topic] = whole_content_qa[start_idx:end_idx]
+                else:
+                    # Generate Q&A for the combined topics
+                    logger.info("Generating Q&A for combined topics")
+                    combined_qa = generate_whole_content_qa(
+                        transcript=self.transcript,
+                        topics=self.topics,
+                        questions_count=self.questions_per_topic * len(self.topics)
+                    )
+                    
+                    # Assign all Q&A pairs to the first topic for simplicity
+                    # This is a placeholder approach - you might want to distribute them differently
+                    if self.topics:
+                        qa_pairs[self.topics[0]] = combined_qa
+            
+            # Store the combined results in shared memory
+            self.shared_memory["qa_pairs"] = qa_pairs
+            self.shared_memory["transformed_content"] = transformed_content
+            
+            logger.info(f"Successfully processed {len(self.topics)} topics")
+            logger.info(f"Generated {sum(len(pairs) for pairs in qa_pairs.values())} Q&A pairs")
+            logger.info(f"Generated {len(transformed_content)} transformed content blocks")
+            
         except Exception as e:
-            error_msg = f"Error in topic processing thread pool: {str(e)}"
+            error_msg = f"Error in topic orchestration: {str(e)}"
             logger.exception(error_msg)
             self.shared_memory["error"] = error_msg
-            return
-        
-        # Handle whole content Q&A generation if enabled
-        if not self.no_qa and self.whole_qa:
-            logger.info("Generating comprehensive Q&A for the entire content")
-            try:
-                whole_content_qa = generate_whole_content_qa(self.topics, self.transcript, num_pairs=5)
-                # Store as a special topic 'whole_content' to be rendered differently in HTML
-                qa_pairs["whole_content"] = whole_content_qa
-                logger.info(f"Successfully generated {len(whole_content_qa)} comprehensive Q&A pairs")
-            except Exception as e:
-                logger.exception(f"Error generating whole content Q&A: {str(e)}")
-                # Continue even if whole content Q&A generation fails
-        
-        # Store results in shared memory (Reduce phase)
-        self.shared_memory["qa_pairs"] = qa_pairs
-        self.shared_memory["transformed_content"] = transformed_content
-        
-        logger.info(f"Processed {len(self.topic_results)} topics")
-        logger.info(f"Generated {sum(len(pairs) for pairs in qa_pairs.values())} Q&A pairs")
-        logger.info(f"Generated {len(transformed_content)} transformed content blocks")
     
     def _process_topic(self, topic, transcript, selected_rubric, questions_per_topic, no_qa):
         """

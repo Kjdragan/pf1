@@ -34,6 +34,20 @@ class RubricSelectionNode(BaseNode):
             "child": "Simplified language, concrete examples (used for ELI5 rubric)"
         }
         self.default_audience = "sophisticated"
+        
+        # Knowledge augmentation level descriptions
+        self.knowledge_level_descriptions = {
+            1: "Pure extraction - only information explicitly stated in the video",
+            2: "Minimal augmentation - mostly video content with very limited context",
+            3: "Low augmentation - video content with occasional clarifications",
+            4: "Below average augmentation - video content with helpful clarifications",
+            5: "Balanced approach - video content with contextual information",
+            6: "Above average augmentation - enhanced video content with context",
+            7: "Moderate augmentation - video content with significant context",
+            8: "High augmentation - video content with substantial external knowledge",
+            9: "Very high augmentation - extensive external knowledge with video as foundation",
+            10: "Maximum augmentation - comprehensive resource using video as starting point"
+        }
     
     def prep(self):
         """
@@ -69,6 +83,7 @@ class RubricSelectionNode(BaseNode):
                 print(f"{i}. {rubric['name']} (Confidence: {rubric['confidence']}%)")
                 print(f"   Description: {rubric['description']}")
                 print(f"   Justification: {rubric['justification']}")
+                print(f"   Default Knowledge Level: {rubric.get('knowledge_level', 5)}/10")
                 print()
             
             # Get user selection
@@ -93,6 +108,40 @@ class RubricSelectionNode(BaseNode):
                     print("Please enter a valid number")
             
             self.selected_rubric = selection
+            
+            # Get knowledge level selection
+            print("\n=== Knowledge Augmentation Level Selection ===")
+            print("Control how much external knowledge is incorporated into the transformation:")
+            
+            # Show the current default knowledge level
+            default_knowledge_level = self.selected_rubric.get('knowledge_level', 5)
+            print(f"Current level: {default_knowledge_level}/10 - {self.knowledge_level_descriptions[default_knowledge_level]}")
+            
+            # Show all knowledge level options
+            print("\nKnowledge Level Options:")
+            for level, description in self.knowledge_level_descriptions.items():
+                print(f"{level}: {description}")
+            
+            knowledge_level = None
+            while knowledge_level is None:
+                try:
+                    user_input = input(f"\nSelect knowledge level (1-10) [Default: {default_knowledge_level}]: ")
+                    
+                    if not user_input.strip():
+                        knowledge_level = default_knowledge_level
+                        logger.info(f"User selected default knowledge level: {knowledge_level}")
+                    else:
+                        level = int(user_input)
+                        if 1 <= level <= 10:
+                            knowledge_level = level
+                            logger.info(f"User selected knowledge level: {knowledge_level}")
+                        else:
+                            print("Please enter a number between 1 and 10")
+                except ValueError:
+                    print("Please enter a valid number")
+            
+            # Update the selected rubric with the chosen knowledge level
+            self.selected_rubric['knowledge_level'] = knowledge_level
             
             # Get audience level selection
             print("\n=== Audience Level Selection ===")
@@ -141,4 +190,4 @@ class RubricSelectionNode(BaseNode):
         self.shared_memory["audience_level"] = self.audience_level
         
         # Log completion
-        logger.info(f"Rubric selection completed: {self.selected_rubric['name']}, Audience: {self.audience_level}")
+        logger.info(f"Rubric selection completed: {self.selected_rubric['name']}, Knowledge Level: {self.selected_rubric.get('knowledge_level', 5)}/10, Audience: {self.audience_level}")

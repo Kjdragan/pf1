@@ -25,6 +25,7 @@ from src.nodes.html_generation_node import HTMLGenerationNode
 from src.nodes.cost_tracking_node import CostTrackingNode
 from src.utils.logger import logger
 from src.utils.prompt_logger import start_new_log_file
+from src.utils.log_manager import clear_log_directories
 
 def run_pipeline(youtube_url, output_dir="output", enable_chunking=False, max_workers=3, no_qa=False, whole_qa=False, track_costs=True):
     """
@@ -238,6 +239,9 @@ def main():
     """
     Main entry point for the application.
     """
+    # Clear log directories for a fresh run
+    clear_log_directories()
+    
     # Initialize a new prompt log file for this run
     start_new_log_file()
     parser = argparse.ArgumentParser(description="YouTube Video Summarizer")

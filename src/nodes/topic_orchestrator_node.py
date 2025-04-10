@@ -132,12 +132,12 @@ class TopicOrchestratorNode(BaseNode):
             # Only generate Q&A for the combined content if not disabled
             if not self.no_qa:
                 if self.whole_qa:
-                    # Generate comprehensive Q&A for the entire content
-                    logger.info("Generating comprehensive Q&A for the entire content")
+                    # Generate comprehensive Q&A for the entire content - fixed at 5 total regardless of topic count
+                    logger.info("Generating comprehensive Q&A for the entire content (fixed total of 5)")
                     whole_content_qa = generate_whole_content_qa(
                         transcript=self.transcript,
                         topics=self.topics,
-                        questions_count=self.questions_per_topic * len(self.topics)
+                        num_pairs=5  # Fixed at 5 total Q&A pairs
                     )
                     
                     # Distribute the Q&A pairs across topics
@@ -149,12 +149,12 @@ class TopicOrchestratorNode(BaseNode):
                         end_idx = start_idx + qa_per_topic if i < len(self.topics) - 1 else qa_count
                         qa_pairs[topic] = whole_content_qa[start_idx:end_idx]
                 else:
-                    # Generate Q&A for the combined topics
-                    logger.info("Generating Q&A for combined topics")
+                    # Generate Q&A for the combined topics - fixed at 5 total regardless of topic count
+                    logger.info("Generating Q&A for combined topics (fixed total of 5)")
                     combined_qa = generate_whole_content_qa(
                         transcript=self.transcript,
                         topics=self.topics,
-                        num_pairs=self.questions_per_topic * len(self.topics)
+                        num_pairs=5  # Fixed at 5 total Q&A pairs
                     )
                     
                     # Store the combined Q&A under the whole_content key so it's properly displayed
